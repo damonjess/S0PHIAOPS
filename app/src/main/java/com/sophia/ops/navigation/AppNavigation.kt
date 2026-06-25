@@ -32,7 +32,10 @@ fun AppNavigation(
             )
         }
         composable(Routes.RADAR) {
-            RadarScreen(vm = viewModel)
+            RadarScreen(
+                navController = navController,
+                vm = viewModel
+            )
         }
     }
 }
