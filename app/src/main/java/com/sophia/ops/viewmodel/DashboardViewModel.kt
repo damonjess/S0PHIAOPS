@@ -1,6 +1,8 @@
 package com.sophia.ops.viewmodel
 
 import android.app.Application
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -86,40 +88,58 @@ class DashboardViewModel(
         // bluetoothDevices.clear() 
         
         bluetoothScanner.startDiscovery { device ->
-            @SuppressLint("MissingPermission")
-            val name = device.name ?: "Unknown Device"
+            val name = getDisplayName(device)
             Log.d("BT", "Adding device: ${device.address} ($name)")
             val risk = BluetoothRiskEngine.calculate(name)
             
-            val entity = BluetoothDeviceEntity(
-                name = name,
-                address = device.address,
-                deviceType = 0, 
-                firstSeen = System.currentTimeMillis(),
-                lastSeen = System.currentTimeMillis(),
-                riskScore = risk
-            )
-            
-            val existingIndex = bluetoothDevices.indexOfFirst { it.address == entity.address }
+            val existingIndex = bluetoothDevices.indexOfFirst { it.address == device.address }
             if (existingIndex != -1) {
+                val existingDevice = bluetoothDevices[existingIndex]
+                
                 // Update existing device
-                bluetoothDevices[existingIndex] = bluetoothDevices[existingIndex].copy(
+                val updatedDevice = existingDevice.copy(
                     name = name,
                     lastSeen = System.currentTimeMillis(),
                     riskScore = risk
                 )
+                bluetoothDevices[existingIndex] = updatedDevice
+
+                viewModelScope.launch {
+                    try {
+                        @SuppressLint("MissingPermission")
+                        val newRealName = device.name
+                        if (existingDevice.name.startsWith("Discovered Device") && !newRealName.isNullOrBlank()) {
+                            bluetoothDao.updateName(existingDevice.id, newRealName)
+                            Log.d("BT", "Updated generic name to: $newRealName")
+                        }
+                        
+                        // Also update lastSeen and risk regardless
+                        bluetoothDao.insert(updatedDevice)
+                    } catch (e: Exception) {
+                        Log.e("BT", "Failed to update DB", e)
+                    }
+                }
             } else {
                 // Add new device
+                @SuppressLint("MissingPermission")
+                val entity = BluetoothDeviceEntity(
+                    name = name,
+                    address = device.address,
+                    deviceType = device.type, 
+                    firstSeen = System.currentTimeMillis(),
+                    lastSeen = System.currentTimeMillis(),
+                    riskScore = risk
+                )
                 bluetoothDevices.add(entity)
-            }
-            
-            // Save to database
-            viewModelScope.launch {
-                try {
-                    bluetoothDao.insert(entity)
-                    Log.d("BT", "Device persisted to DB: ${entity.address}")
-                } catch (e: Exception) {
-                    Log.e("BT", "Failed to save to DB", e)
+                
+                // Save to database
+                viewModelScope.launch {
+                    try {
+                        bluetoothDao.insert(entity)
+                        Log.d("BT", "Device persisted to DB: ${entity.address}")
+                    } catch (e: Exception) {
+                        Log.e("BT", "Failed to save to DB", e)
+                    }
                 }
             }
 
@@ -199,5 +219,25 @@ class DashboardViewModel(
             delay(1000)
             isThrottled = false
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun getDisplayName(device: BluetoothDevice): String {
+        // 1. Check if the device is already paired (bonded) for a high-quality name
+        val adapter = BluetoothAdapter.getDefaultAdapter()
+        val bondedMatch = adapter?.bondedDevices?.firstOrNull { it.address == device.address }
+        val bondedName = bondedMatch?.name
+        if (!bondedName.isNullOrBlank()) return bondedName
+
+        // 2. Try the name reported during discovery
+        val name = device.name
+        if (!name.isNullOrBlank()) return name
+
+        // 3. Try the alias (Android R+)
+        val alias = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) device.alias else null
+        if (!alias.isNullOrBlank()) return alias
+
+        // 4. Fallback to generic label
+        return "Discovered Device (${device.address.takeLast(5)})"
     }
 }

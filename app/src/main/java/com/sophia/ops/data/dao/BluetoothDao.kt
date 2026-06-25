@@ -15,4 +15,7 @@ interface BluetoothDao {
 
     @Query("SELECT * FROM bluetooth_devices ORDER BY lastSeen DESC")
     fun getAll(): Flow<List<BluetoothDeviceEntity>>
+
+    @Query("UPDATE bluetooth_devices SET name = :name WHERE id = :id")
+    suspend fun updateName(id: Int, name: String)
 }

@@ -58,7 +58,6 @@ fun DevicesScreen(
 
 @Composable
 fun DeviceItem(device: BluetoothDeviceEntity, onClick: () -> Unit) {
-    val sdf = remember { SimpleDateFormat("MMM dd, HH:mm:ss", Locale.getDefault()) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -69,25 +68,25 @@ fun DeviceItem(device: BluetoothDeviceEntity, onClick: () -> Unit) {
             modifier = Modifier.padding(16.dp)
         ) {
             Text(
-                text = device.name.ifBlank { "Unknown Device" },
+                text = device.name,
                 style = MaterialTheme.typography.titleLarge
             )
             Text(
-                text = "MAC: ${device.address}",
+                text = getDeviceType(device.deviceType),
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.Gray
+            )
+            Text(
+                text = device.address,
                 style = MaterialTheme.typography.bodyMedium
             )
-            
-            Text(
-                text = "Last Seen: ${sdf.format(Date(device.lastSeen))}",
-                style = MaterialTheme.typography.bodySmall
-            )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             Text(
                 text = "Risk: ${device.riskScore}",
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (device.riskScore > 0) Color.Red else Color.Green
+                color = if (device.riskScore > 30) Color.Red else if (device.riskScore > 0) Color.Yellow else Color.Green
             )
         }
     }
@@ -102,7 +101,7 @@ fun DeviceDetailsDialog(device: BluetoothDeviceEntity, onDismiss: () -> Unit) {
         text = {
             Column {
                 DetailRow("Address", device.address)
-                DetailRow("Type", getFriendlyType(device.deviceType))
+                DetailRow("Type", getDeviceType(device.deviceType))
                 DetailRow("First Seen", sdf.format(Date(device.firstSeen)))
                 DetailRow("Last Seen", sdf.format(Date(device.lastSeen)))
                 DetailRow("Risk Score", device.riskScore.toString())
@@ -129,11 +128,11 @@ fun DetailRow(label: String, value: String) {
     }
 }
 
-fun getFriendlyType(type: Int): String {
+private fun getDeviceType(type: Int): String {
     return when (type) {
-        1 -> "Classic (BR/EDR)"
-        2 -> "Low Energy (LE)"
-        3 -> "Dual Mode (BR/EDR/LE)"
-        else -> "Unknown"
+        BluetoothDevice.DEVICE_TYPE_LE -> "BLE Device"
+        BluetoothDevice.DEVICE_TYPE_DUAL -> "Dual Mode Device"
+        BluetoothDevice.DEVICE_TYPE_CLASSIC -> "Classic Device"
+        else -> "Unknown Type"
     }
 }
