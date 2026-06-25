@@ -74,6 +74,10 @@ fun DashboardScreen(
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
+                        text = "Security: ${network.security}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
                         text = "Risk: ${network.riskScore}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (network.riskScore > 50) Color.Red else Color.Unspecified

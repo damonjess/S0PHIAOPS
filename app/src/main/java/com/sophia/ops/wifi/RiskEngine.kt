@@ -10,12 +10,12 @@ object RiskEngine {
         var score = 0
 
         if (security.contains("WEP"))
-            score += 30
-
-        if (security.isBlank())
             score += 40
 
-        if (signal > -40)
+        if (!security.contains("WPA"))
+            score += 30
+
+        if (signal > -50)
             score += 10
 
         return score.coerceIn(0, 100)
