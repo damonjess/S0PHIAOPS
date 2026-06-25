@@ -29,7 +29,7 @@ fun DashboardScreen(
     LaunchedEffect(Unit) {
         while (true) {
             vm.scan()
-            delay(5000)
+            delay(10000)
         }
     }
 
