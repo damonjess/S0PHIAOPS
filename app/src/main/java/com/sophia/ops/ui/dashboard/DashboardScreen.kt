@@ -15,6 +15,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.sophia.ops.viewmodel.DashboardViewModel
@@ -57,20 +58,25 @@ fun DashboardScreen(
             }
         }
 
-        items(vm.networks) {
-
-            Card {
-
-                Column {
-
-                    Text(it.ssid)
-
+        items(vm.networks) { network ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        "Signal: ${it.signal}"
+                        text = network.ssid,
+                        style = MaterialTheme.typography.titleMedium
                     )
-
                     Text(
-                        "Risk: ${it.riskScore}"
+                        text = "Signal: ${network.signal} dBm",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        text = "Risk: ${network.riskScore}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (network.riskScore > 50) Color.Red else Color.Unspecified
                     )
                 }
             }
