@@ -1,12 +1,13 @@
 package com.sophia.ops.ui.radar
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -16,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -54,7 +56,7 @@ fun RadarScreen(
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = "Tactical Radar",
@@ -73,7 +75,7 @@ fun RadarScreen(
             modifier = Modifier
                 .padding(top = 8.dp)
                 .fillMaxWidth(),
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = "Status: ",
@@ -86,9 +88,15 @@ fun RadarScreen(
                 color = if (vm.lastScanWasLive) Color.Green else Color.Red,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
             )
+            
+            Spacer(modifier = Modifier.weight(1f))
+            
+            LegendItem("Wi-Fi", Color.Green)
+            Spacer(modifier = Modifier.width(8.dp))
+            LegendItem("BT", Color.Blue)
         }
 
-        Canvas(
+        androidx.compose.foundation.Canvas(
             modifier = Modifier.fillMaxSize()
         ) {
             val center = Offset(size.width / 2, size.height / 2)
@@ -183,5 +191,16 @@ fun RadarScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+fun LegendItem(label: String, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.foundation.Canvas(modifier = Modifier.size(8.dp)) {
+            drawCircle(color = color)
+        }
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(text = label, style = MaterialTheme.typography.labelSmall, color = Color.White)
     }
 }

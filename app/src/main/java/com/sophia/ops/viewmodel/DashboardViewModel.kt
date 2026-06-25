@@ -8,6 +8,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import com.sophia.ops.data.entities.WifiNetwork
 import com.sophia.ops.data.entities.BluetoothDeviceEntity
+import com.sophia.ops.data.entities.ScanSession
+import com.sophia.ops.data.db.SophiaDatabase
 import com.sophia.ops.bluetooth.BluetoothScanner
 import com.sophia.ops.bluetooth.BluetoothRiskEngine
 import com.sophia.ops.wifi.RiskEngine
@@ -15,6 +17,7 @@ import com.sophia.ops.wifi.WifiScanner
 import android.util.Log
 import android.annotation.SuppressLint
 import androidx.lifecycle.viewModelScope
+import androidx.room.Room
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -26,6 +29,15 @@ class DashboardViewModel(
 ) : AndroidViewModel(application) {
 
     private val tag = "DashboardViewModel"
+    
+    private val db = Room.databaseBuilder(
+        application,
+        SophiaDatabase::class.java, "sophia-db"
+    ).fallbackToDestructiveMigration().build()
+    
+    private val bluetoothDao = db.bluetoothDao()
+    private val scanDao = db.scanSessionDao()
+    
     private val scanner = WifiScanner(getApplication())
     private val bluetoothScanner = BluetoothScanner(getApplication())
     private var isScanning = false
@@ -38,7 +50,7 @@ class DashboardViewModel(
     val bluetoothDevices = mutableStateListOf<BluetoothDeviceEntity>()
     
     val totalThreatScore: Int
-        get() = networks.sumOf { it.riskScore } + bluetoothDevices.sumOf { it.riskScore }
+        get() = (networks.size + bluetoothDevices.size).coerceIn(0, 100)
     
     // UI indicator for throttling
     var isThrottled by mutableStateOf(false)
@@ -70,25 +82,48 @@ class DashboardViewModel(
         isScanning = true
         Log.i(tag, "Initiating scan at $now...")
         
-        bluetoothDevices.clear()
+        // Remove immediate clear to avoid UI flickering
+        // bluetoothDevices.clear() 
+        
         bluetoothScanner.startDiscovery { device ->
             @SuppressLint("MissingPermission")
-            val name = device.name ?: ""
+            val name = device.name ?: "Unknown Device"
+            Log.d("BT", "Adding device: ${device.address} ($name)")
             val risk = BluetoothRiskEngine.calculate(name)
             
             val entity = BluetoothDeviceEntity(
                 name = name,
                 address = device.address,
-                deviceType = 0, // Simplified to avoid extra permission check in VM
+                deviceType = 0, 
                 firstSeen = System.currentTimeMillis(),
                 lastSeen = System.currentTimeMillis(),
                 riskScore = risk
             )
             
-            // Avoid duplicates in the live list
-            if (bluetoothDevices.none { it.address == entity.address }) {
+            val existingIndex = bluetoothDevices.indexOfFirst { it.address == entity.address }
+            if (existingIndex != -1) {
+                // Update existing device
+                bluetoothDevices[existingIndex] = bluetoothDevices[existingIndex].copy(
+                    name = name,
+                    lastSeen = System.currentTimeMillis(),
+                    riskScore = risk
+                )
+            } else {
+                // Add new device
                 bluetoothDevices.add(entity)
             }
+            
+            // Save to database
+            viewModelScope.launch {
+                try {
+                    bluetoothDao.insert(entity)
+                    Log.d("BT", "Device persisted to DB: ${entity.address}")
+                } catch (e: Exception) {
+                    Log.e("BT", "Failed to save to DB", e)
+                }
+            }
+
+            Log.d("BT", "Total devices in VM: ${bluetoothDevices.size}")
         }
         
         scanner.startScan { results ->
@@ -117,6 +152,26 @@ class DashboardViewModel(
 
             networks.clear()
             networks.addAll(updatedList)
+
+            // Save scan session summary
+            saveScanSession()
+        }
+    }
+
+    private fun saveScanSession() {
+        viewModelScope.launch {
+            try {
+                val session = ScanSession(
+                    timestamp = System.currentTimeMillis(),
+                    wifiCount = networks.size,
+                    bluetoothCount = bluetoothDevices.size,
+                    threatScore = totalThreatScore
+                )
+                scanDao.insert(session)
+                Log.d(tag, "Scan session saved: ${session.threatScore} threat score")
+            } catch (e: Exception) {
+                Log.e(tag, "Failed to save scan session", e)
+            }
         }
     }
 

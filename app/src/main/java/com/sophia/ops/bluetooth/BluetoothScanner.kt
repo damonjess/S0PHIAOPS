@@ -24,8 +24,22 @@ class BluetoothScanner(
             return
         }
 
+        if (!adapter.isEnabled) {
+            Log.e(tag, "Bluetooth is disabled. Cannot start discovery.")
+            return
+        }
+
+        // Final permission check before interacting with adapter to avoid crashes
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                Log.e(tag, "Cannot start discovery: BLUETOOTH_SCAN permission not granted")
+                return
+            }
+        }
+
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
+                Log.d("BT", "Receiver triggered: ${intent?.action}")
                 when (intent?.action) {
                     BluetoothDevice.ACTION_FOUND -> {
                         val device: BluetoothDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -35,8 +49,8 @@ class BluetoothScanner(
                             intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                         }
 
+                        Log.d("BT", "Found: ${device?.name} [${device?.address}]")
                         device?.let {
-                            Log.i(tag, "Device found: ${it.name} [${it.address}]")
                             onDeviceFound(it)
                         }
                     }
@@ -58,7 +72,6 @@ class BluetoothScanner(
         }
 
         try {
-            // Register as EXPORTED because ACTION_FOUND comes from the Bluetooth system app
             ContextCompat.registerReceiver(
                 context,
                 receiver,
@@ -69,19 +82,26 @@ class BluetoothScanner(
             Log.e(tag, "Failed to register receiver", e)
         }
 
-        if (adapter.isDiscovering) {
-            adapter.cancelDiscovery()
-        }
+        try {
+            if (adapter.isDiscovering) {
+                adapter.cancelDiscovery()
+            }
 
-        val started = adapter.startDiscovery()
-        Log.i(tag, "Bluetooth discovery started: $started")
+            val started = adapter.startDiscovery()
+            Log.d("BT", "Discovery started: $started")
 
-        if (!started) {
+            if (!started) {
+                try {
+                    context.unregisterReceiver(receiver)
+                } catch (e: Exception) {
+                    // Ignore
+                }
+            }
+        } catch (e: SecurityException) {
+            Log.e(tag, "SecurityException during discovery start: ${e.message}")
             try {
                 context.unregisterReceiver(receiver)
-            } catch (e: Exception) {
-                // Ignore
-            }
+            } catch (ex: Exception) { }
         }
     }
 }
