@@ -14,15 +14,23 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.sophia.ops.viewmodel.DashboardViewModel
+import kotlinx.coroutines.delay
 
 @Composable
 fun DashboardScreen(
     vm: DashboardViewModel,
     onNavigateToRadar: () -> Unit
 ) {
+    LaunchedEffect(Unit) {
+        while (true) {
+            vm.scan()
+            delay(5000)
+        }
+    }
 
     LazyColumn {
 
