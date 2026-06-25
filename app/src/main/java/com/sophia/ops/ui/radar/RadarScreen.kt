@@ -56,11 +56,9 @@ fun RadarScreen(
 
             // Draw network points
             vm.networks.forEach { network ->
-                // Map signal (-100 to -30) to radius (maxRadius to 0)
-                val normalizedSignal = ((network.signal + 100) / 70f).coerceIn(0f, 1f)
-                val radius = maxRadius * (1f - normalizedSignal)
+                val normalizedSignal = ((network.signal + 100).coerceIn(0, 100)) / 100f
+                val radius = (size.minDimension / 2f) * (1f - normalizedSignal)
 
-                // Use BSSID hash to assign a stable random angle
                 val angle = (network.bssid.hashCode().toFloat() % 360) * (Math.PI / 180).toFloat()
 
                 val x = center.x + radius * cos(angle)
