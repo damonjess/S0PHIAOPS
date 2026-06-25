@@ -12,5 +12,6 @@ data class WifiNetwork(
     val signal: Int,
     val security: String,
     val riskScore: Int,
-    val timestamp: Long
+    val timestamp: Long,
+    val angularOffset: Float = 0f
 )
