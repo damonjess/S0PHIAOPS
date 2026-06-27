@@ -4,7 +4,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
@@ -76,8 +78,18 @@ fun HistoryScreen(vm: HistoryViewModel) {
                         Button(
                             onClick = {
                                 showClearHistoryDialog = true
-                            }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError
+                            )
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = null,
+                                modifier = Modifier.size(ButtonDefaults.IconSize)
+                            )
+                            Spacer(modifier = Modifier.width(ButtonDefaults.IconSpacing))
                             Text("Clear History")
                         }
                     }
@@ -108,7 +120,11 @@ fun HistoryScreen(vm: HistoryViewModel) {
                     onClick = {
                         vm.clearHistory()
                         showClearHistoryDialog = false
-                    }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
                 ) {
                     Text("Clear")
                 }
@@ -131,8 +147,9 @@ fun ThreatTrendGraph(sessions: List<ScanSession>) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .height(200.dp)
-            .padding(16.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .height(200.dp),
+        shape = RoundedCornerShape(24.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text("Threat Trend (Last 10)", style = MaterialTheme.typography.labelMedium)
@@ -185,7 +202,8 @@ fun HistoryItem(session: ScanSession) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(24.dp)
     ) {
         Row(
             modifier = Modifier

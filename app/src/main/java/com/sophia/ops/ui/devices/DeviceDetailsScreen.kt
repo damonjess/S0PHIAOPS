@@ -2,6 +2,7 @@ package com.sophia.ops.ui.devices
 
 import android.bluetooth.BluetoothDevice
 import android.text.format.DateUtils
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -64,19 +65,57 @@ fun DeviceDetailsScreen(
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                // Device Name & Favourite Star
+                // Device Header
+                val displayName = when {
+                    !device.nickname.isNullOrBlank() -> device.nickname
+                    !device.name.isNullOrBlank() && !device.name.startsWith("Discovered Device") -> device.name
+                    else -> "Unknown Bluetooth Device"
+                }
                 Text(
-                    text = device.nickname ?: device.name,
-                    style = MaterialTheme.typography.headlineLarge,
+                    text = displayName,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
+                Text(
+                    text = getDeviceType(device.deviceType),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.Gray
+                )
+                Text(
+                    text = device.address,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+                Text(
+                    text = "Seen ${device.timesSeen} times",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
                 
-                if (device.favourite) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Star, contentDescription = null, tint = Color.Yellow, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val riskColor = getRiskColor(device.riskScore)
+                    Surface(
+                        color = riskColor.copy(alpha = 0.1f),
+                        contentColor = riskColor,
+                        shape = MaterialTheme.shapes.small,
+                        border = BorderStroke(1.dp, riskColor.copy(alpha = 0.5f))
+                    ) {
+                        Text(
+                            text = getRiskLabel(device.riskScore).uppercase(),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    
+                    if (device.favourite) {
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Icon(Icons.Default.Star, contentDescription = null, tint = Color.Yellow, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Favourite", style = MaterialTheme.typography.labelLarge, color = Color.Yellow)
+                        Text(text = "Favourite", style = MaterialTheme.typography.labelMedium, color = Color.Yellow)
                     }
                 }
                 
@@ -88,19 +127,11 @@ fun DeviceDetailsScreen(
                 Spacer(modifier = Modifier.height(24.dp))
                 
                 // Grid/List of details
-                DetailRow("Name", device.name)
-                DetailRow("Nickname", device.nickname ?: "None")
-                DetailRow("MAC", device.address)
-                DetailRow("Type", getDeviceType(device.deviceType))
                 DetailRow("First Seen", formatFirstSeen(device.firstSeen))
                 DetailRow("Last Seen", formatLastSeen(device.lastSeen))
-                DetailRow("Seen", "${device.timesSeen} Times")
                 DetailRow("Signal", "${device.rssi} dBm")
-                DetailRow(
-                    "Risk", 
-                    getRiskLabel(device.riskScore), 
-                    color = getRiskColor(device.riskScore)
-                )
+                DetailRow("Raw Name", device.name ?: "None")
+                DetailRow("Nickname", device.nickname ?: "None")
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
@@ -226,9 +257,9 @@ private fun formatLastSeen(timestamp: Long): String {
 
 private fun getRiskLabel(score: Int): String {
     return when {
-        score > 50 -> "HIGH"
-        score > 20 -> "MEDIUM"
-        else -> "LOW"
+        score > 50 -> "High"
+        score > 20 -> "Medium"
+        else -> "Low"
     }
 }
 

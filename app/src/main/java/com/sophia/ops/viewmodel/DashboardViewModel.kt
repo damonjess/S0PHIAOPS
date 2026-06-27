@@ -191,8 +191,9 @@ class DashboardViewModel(
 
                     @SuppressLint("MissingPermission")
                     val entity = if (existing == null) {
-                        BluetoothDeviceEntity(
-                            name = name,
+                        val sanitizedName = if (name?.startsWith("Discovered Device") == true) null else name
+                        val newEntity = BluetoothDeviceEntity(
+                            name = sanitizedName,
                             address = device.address,
                             deviceType = device.type,
                             firstSeen = now,
@@ -202,27 +203,30 @@ class DashboardViewModel(
                             timesSeen = 1,
                             signalHistory = trimmedHistory
                         )
+                        bluetoothDao.insert(newEntity)
+                        Log.d("BT", "New device persisted: ${newEntity.address}")
+                        newEntity
                     } else {
-                        // Use the new name if it's not a generic fallback, otherwise keep existing
-                        val isNewNameReal = !name.startsWith("Discovered Device")
-                        val finalName = if (isNewNameReal) name else existing.name
+                        // Update name if we just found a real one, otherwise keep existing
+                        val isNewNameAvailable = !name.isNullOrBlank() && !name.startsWith("Discovered Device")
+                        val finalName = if (isNewNameAvailable) {
+                            name
+                        } else {
+                            if (existing.name?.startsWith("Discovered Device") == true) null else existing.name
+                        }
                         
-                        existing.copy(
+                        val updatedEntity = existing.copy(
                             name = finalName,
                             lastSeen = now,
-                            riskScore = if (isNewNameReal) risk else existing.riskScore,
+                            riskScore = if (isNewNameAvailable) risk else existing.riskScore,
                             rssi = rssi,
                             timesSeen = existing.timesSeen + 1,
                             signalHistory = trimmedHistory
                         )
-                    }
-
-                    if (existing == null) {
-                        bluetoothDao.insert(entity)
-                        Log.d("BT", "New device persisted: ${entity.address}")
-                    } else {
-                        bluetoothDao.updateDevice(entity)
-                        Log.d("BT", "Existing device updated: ${entity.address}")
+                        
+                        bluetoothDao.updateDevice(updatedEntity)
+                        Log.d("BT", "Existing device updated: ${updatedEntity.address}")
+                        updatedEntity
                     }
 
                     // Sync with UI list
@@ -323,7 +327,7 @@ class DashboardViewModel(
     }
 
     @SuppressLint("MissingPermission")
-    private fun getDisplayName(device: BluetoothDevice): String {
+    private fun getDisplayName(device: BluetoothDevice): String? {
         // 1. Check if the device is already paired (bonded) for a high-quality name
         val adapter = BluetoothAdapter.getDefaultAdapter()
         val bondedMatch = adapter?.bondedDevices?.firstOrNull { it.address == device.address }
@@ -338,8 +342,8 @@ class DashboardViewModel(
         val alias = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) device.alias else null
         if (!alias.isNullOrBlank()) return alias
 
-        // 4. Fallback to generic label
-        return "Discovered Device (${device.address.takeLast(5)})"
+        // 4. No name found
+        return null
     }
 
     fun toggleFavourite(device: BluetoothDeviceEntity) {

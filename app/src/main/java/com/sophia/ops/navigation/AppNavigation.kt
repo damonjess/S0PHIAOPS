@@ -114,6 +114,7 @@ fun AppNavigation(
                 val devicesVm: DevicesViewModel = viewModel()
                 DevicesScreen(
                     vm = devicesVm,
+                    dashboardVm = viewModel,
                     onDeviceClick = { device ->
                         navController.navigate("device_details/${device.address}")
                     }

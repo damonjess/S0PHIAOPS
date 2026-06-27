@@ -14,8 +14,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -316,8 +319,14 @@ fun RadarScreen(
                                     modifier = Modifier.padding(end = 8.dp)
                                 )
 
+                                val displayName = when {
+                                    !device.nickname.isNullOrBlank() -> device.nickname
+                                    !device.name.isNullOrBlank() && !device.name.startsWith("Discovered Device") -> device.name
+                                    else -> "Unknown Bluetooth Device"
+                                }
+                                
                                 Text(
-                                    text = device.name,
+                                    text = displayName,
                                     style = MaterialTheme.typography.labelMedium,
                                     color = Color.White
                                 )
@@ -393,51 +402,66 @@ fun RadarScreen(
         // Device Timeline Section
         vm.selectedDevice?.let { device ->
             Spacer(modifier = Modifier.height(16.dp))
-            Column(
+            Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(8.dp)
-                    .background(
-                        Color.White.copy(alpha = 0.05f),
-                        MaterialTheme.shapes.medium
-                    )
-                    .padding(12.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color.White.copy(alpha = 0.05f)
+                )
             ) {
-                Text(
-                    text = "Device Timeline: ${device.name}",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = Color.Green,
-                    modifier = Modifier.clickable { onDeviceClick(device) }
-                )
-                
-                val (riskText, riskColor) = when {
-                    device.riskScore > 50 -> "🔴 High Risk" to Color.Red
-                    device.riskScore > 20 -> "🟠 Medium Risk" to Color.Yellow
-                    else -> "🟢 Low Risk" to Color.Green
-                }
-                Text(
-                    text = riskText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = riskColor
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween
+                Column(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .fillMaxWidth()
                 ) {
-                    TimelineItem(
-                        "First Seen", 
-                        DateUtils.getRelativeTimeSpanString(device.firstSeen).toString()
+                    val displayName = when {
+                        !device.nickname.isNullOrBlank() -> device.nickname
+                        !device.name.isNullOrBlank() && !device.name.startsWith("Discovered Device") -> device.name
+                        else -> "Unknown Bluetooth Device"
+                    }
+                    Text(
+                        text = "Device Timeline: $displayName",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = Color.Green,
+                        modifier = Modifier.clickable { onDeviceClick(device) }
                     )
-                    TimelineItem(
-                        "Last Seen", 
-                        DateUtils.getRelativeTimeSpanString(device.lastSeen).toString()
+                    Text(
+                        text = device.address,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray
                     )
-                    TimelineItem(
-                        "Seen", 
-                        "${device.timesSeen} Times"
+                    
+                    val (riskText, riskColor) = when {
+                        device.riskScore > 50 -> "🔴 High Risk" to Color.Red
+                        device.riskScore > 20 -> "🟠 Medium Risk" to Color.Yellow
+                        else -> "🟢 Low Risk" to Color.Green
+                    }
+                    Text(
+                        text = riskText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = riskColor
                     )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween
+                    ) {
+                        TimelineItem(
+                            "First Seen", 
+                            DateUtils.getRelativeTimeSpanString(device.firstSeen).toString()
+                        )
+                        TimelineItem(
+                            "Last Seen", 
+                            DateUtils.getRelativeTimeSpanString(device.lastSeen).toString()
+                        )
+                        TimelineItem(
+                            "Seen", 
+                            "${device.timesSeen} Times"
+                        )
+                    }
                 }
             }
         }

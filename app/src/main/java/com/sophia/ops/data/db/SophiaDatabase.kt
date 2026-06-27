@@ -16,7 +16,7 @@ import com.sophia.ops.data.entities.ScanSession
         BluetoothDeviceEntity::class,
         ScanSession::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
