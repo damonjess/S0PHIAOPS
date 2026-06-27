@@ -1,9 +1,13 @@
 package com.sophia.ops.ui.devices
 
 import android.bluetooth.BluetoothDevice
+import android.text.format.DateUtils
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,6 +30,9 @@ fun DeviceDetailsScreen(
 ) {
     val deviceState = vm.getDevice(address).collectAsState(initial = null)
     val device = deviceState.value
+    
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameText by remember(device?.nickname) { mutableStateOf(device?.nickname ?: "") }
 
     Scaffold(
         topBar = {
@@ -39,90 +46,147 @@ fun DeviceDetailsScreen(
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            if (device == null) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else {
-                val sdf = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
-
+        if (device == null) {
+            Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Header Separator
+                HorizontalDivider(color = Color.Gray, thickness = 1.dp)
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Device Name & Favourite Star
                 Text(
-                    text = device.name.ifBlank { "Unknown Device" },
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
+                    text = device.nickname ?: device.name,
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
                 )
                 
-                Text(
-                    text = device.address,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.Gray
-                )
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                DetailCard {
-                    Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
-                        DetailItem("Device Type", getDeviceType(device.deviceType))
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.DarkGray)
-                        
-                        Row(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                DetailItem("First Seen", sdf.format(Date(device.firstSeen)))
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                DetailItem("Last Seen", sdf.format(Date(device.lastSeen)))
-                            }
-                        }
-                        
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.DarkGray)
-                        
-                        DetailItem("Seen", "${device.timesSeen} Times")
-                        
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.DarkGray)
-                        
-                        DetailItem(
-                            label = "Risk",
-                            value = when {
-                                device.riskScore > 50 -> "High"
-                                device.riskScore > 20 -> "Medium"
-                                else -> "Low"
-                            },
-                            valueColor = when {
-                                device.riskScore > 50 -> Color.Red
-                                device.riskScore > 20 -> Color.Yellow
-                                else -> Color.Green
-                            }
-                        )
+                if (device.favourite) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Star, contentDescription = null, tint = Color.Yellow, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Favourite", style = MaterialTheme.typography.labelLarge, color = Color.Yellow)
                     }
                 }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Content Separator
+                HorizontalDivider(color = Color.Gray, thickness = 1.dp)
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                // Grid/List of details
+                DetailRow("Name", device.name)
+                DetailRow("Nickname", device.nickname ?: "None")
+                DetailRow("MAC", device.address)
+                DetailRow("Type", getDeviceType(device.deviceType))
+                DetailRow("First Seen", formatFirstSeen(device.firstSeen))
+                DetailRow("Last Seen", formatLastSeen(device.lastSeen))
+                DetailRow("Seen", "${device.timesSeen} Times")
+                DetailRow("Signal", "${device.rssi} dBm")
+                DetailRow(
+                    "Risk", 
+                    getRiskLabel(device.riskScore), 
+                    color = getRiskColor(device.riskScore)
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = "Notes",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.Gray,
+                    modifier = Modifier.align(Alignment.Start)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                AssistChip(
+                    onClick = { },
+                    label = { Text(device.notes ?: "None") },
+                    modifier = Modifier.align(Alignment.Start)
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                // Actions Separator
+                HorizontalDivider(color = Color.Gray, thickness = 1.dp)
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                // Action Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    OutlinedButton(onClick = { showRenameDialog = true }) {
+                        Text("[ Rename ]")
+                    }
+                    OutlinedButton(onClick = { vm.toggleFavourite(device.address, device.favourite) }) {
+                        Text(if (device.favourite) "[ Unfavourite ]" else "[ Favourite ]")
+                    }
+                    OutlinedButton(
+                        onClick = { 
+                            vm.toggleIgnored(device.address, device.ignored)
+                            onBack()
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = if (device.ignored) Color.White else Color.Red.copy(alpha = 0.8f)
+                        )
+                    ) {
+                        Text(if (device.ignored) "[ Unignore ]" else "[ Ignore ]")
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                HorizontalDivider(color = Color.Gray, thickness = 1.dp)
             }
         }
     }
-}
 
-@Composable
-fun DetailCard(content: @Composable () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = Color.DarkGray.copy(alpha = 0.2f)
-        ),
-        shape = MaterialTheme.shapes.large
-    ) {
-        content()
+    if (showRenameDialog && device != null) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("Rename Nickname") },
+            text = {
+                TextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    singleLine = true,
+                    label = { Text("Nickname") }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.updateNickname(device.address, renameText.ifBlank { null })
+                    showRenameDialog = false
+                }) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
 @Composable
-fun DetailItem(label: String, value: String, valueColor: Color = Color.White) {
-    Column {
+fun DetailRow(label: String, value: String, color: Color = Color.White) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium,
@@ -130,10 +194,11 @@ fun DetailItem(label: String, value: String, valueColor: Color = Color.White) {
         )
         Text(
             text = value,
-            style = MaterialTheme.typography.titleLarge,
-            color = valueColor,
+            style = MaterialTheme.typography.bodyLarge,
+            color = color,
             fontWeight = FontWeight.Medium
         )
+        Spacer(modifier = Modifier.height(4.dp))
     }
 }
 
@@ -143,5 +208,34 @@ private fun getDeviceType(type: Int): String {
         BluetoothDevice.DEVICE_TYPE_DUAL -> "Dual Mode Device"
         BluetoothDevice.DEVICE_TYPE_CLASSIC -> "Classic Device"
         else -> "Unknown Type"
+    }
+}
+
+private fun formatFirstSeen(timestamp: Long): String {
+    return DateUtils.getRelativeTimeSpanString(
+        timestamp,
+        System.currentTimeMillis(),
+        DateUtils.DAY_IN_MILLIS
+    ).toString()
+}
+
+private fun formatLastSeen(timestamp: Long): String {
+    val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
+    return sdf.format(Date(timestamp))
+}
+
+private fun getRiskLabel(score: Int): String {
+    return when {
+        score > 50 -> "HIGH"
+        score > 20 -> "MEDIUM"
+        else -> "LOW"
+    }
+}
+
+private fun getRiskColor(score: Int): Color {
+    return when {
+        score > 50 -> Color.Red
+        score > 20 -> Color.Yellow
+        else -> Color.Green
     }
 }

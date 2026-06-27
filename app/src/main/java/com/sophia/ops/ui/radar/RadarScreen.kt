@@ -1,7 +1,10 @@
 package com.sophia.ops.ui.radar
 
+import android.text.format.DateUtils
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import com.sophia.ops.data.entities.BluetoothDeviceEntity
 import com.sophia.ops.viewmodel.DashboardViewModel
 import kotlinx.coroutines.delay
 import kotlin.math.cos
@@ -38,7 +42,8 @@ import kotlin.math.sin
 
 @Composable
 fun RadarScreen(
-    vm: DashboardViewModel
+    vm: DashboardViewModel,
+    onDeviceClick: (BluetoothDeviceEntity) -> Unit = {}
 ) {
     var sweepAngle by remember {
         mutableFloatStateOf(0f)
@@ -139,6 +144,8 @@ fun RadarScreen(
             LegendItem("Wi-Fi", Color.Green)
             Spacer(modifier = Modifier.width(8.dp))
             LegendItem("BT", Color.Blue)
+            Spacer(modifier = Modifier.width(8.dp))
+            LegendItem("Fav", Color.Yellow)
         }
 
         androidx.compose.foundation.Canvas(
@@ -219,21 +226,33 @@ fun RadarScreen(
 
             // Draw Bluetooth devices
             vm.bluetoothDevices.forEach { device ->
-                val radius = (size.minDimension / 2.5f) * (0.5f + (device.address.hashCode().toFloat() % 50) / 100f)
+                val normalized =
+                    ((device.rssi + 100)
+                        .coerceIn(0, 100))
+                        .toFloat() / 100f
+
+                val radius =
+                    (size.minDimension / 2.2f) *
+                    (1f - normalized)
+                    
                 val angle = (device.address.hashCode().toFloat() % 360) * (Math.PI / 180).toFloat()
 
                 val x = center.x + radius * cos(angle)
                 val y = center.y + radius * sin(angle)
 
-                val color = Color(
-                    red = (device.riskScore / 100f).coerceIn(0f, 1f),
-                    green = 0f,
-                    blue = (1f - (device.riskScore / 100f)).coerceIn(0.5f, 1f)
-                )
+                val color = if (device.favourite) {
+                    Color.Yellow
+                } else {
+                    Color(
+                        red = (device.riskScore / 100f).coerceIn(0f, 1f),
+                        green = 0f,
+                        blue = (1f - (device.riskScore / 100f)).coerceIn(0.5f, 1f)
+                    )
+                }
 
                 drawCircle(
                     color = color,
-                    radius = 6.dp.toPx(),
+                    radius = if (device.favourite) 8.dp.toPx() else 6.dp.toPx(),
                     center = Offset(x, y)
                 )
             }
@@ -245,6 +264,99 @@ fun RadarScreen(
                 .fillMaxWidth()
                 .padding(top = 16.dp)
         ) {
+            Text(
+                text = "Signal History",
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White.copy(alpha = 0.7f)
+            )
+            
+            Spacer(modifier = Modifier.size(8.dp))
+            
+            if (vm.bluetoothDevices.isEmpty()) {
+                Text(
+                    text = "No signals detected yet...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+            } else {
+                // Show last 3 devices for brevity, or a scrollable list
+                val exampleNotes = listOf(null, "Medical ECG", "Trusted", "Kitchen", "Temporary")
+                vm.bluetoothDevices.takeLast(3).reversed().forEach { device ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    vm.selectDevice(device)
+                                    // Cycle notes logic shifted to a double tap or long press? 
+                                    // For now, let's just make click select, and maybe a specific button for notes?
+                                    // Or just cycle on click and select.
+                                    val currentIndex = exampleNotes.indexOf(device.notes)
+                                    val nextIndex = (currentIndex + 1) % exampleNotes.size
+                                    vm.updateNotes(device, exampleNotes[nextIndex])
+                                }
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val (riskText, riskColor) = when {
+                                    device.riskScore > 50 -> "🔴 High" to Color.Red
+                                    device.riskScore > 20 -> "🟠 Medium" to Color.Yellow
+                                    else -> "🟢 Low" to Color.Green
+                                }
+                                
+                                Text(
+                                    text = riskText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = riskColor,
+                                    modifier = Modifier.padding(end = 8.dp)
+                                )
+
+                                Text(
+                                    text = device.name,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = Color.White
+                                )
+                                device.notes?.let { note ->
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    AssistChip(
+                                        onClick = { },
+                                        label = { Text(note, style = MaterialTheme.typography.labelSmall) },
+                                        modifier = Modifier.height(20.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = device.address,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray
+                            )
+                        }
+                        
+                        Row {
+                            device.signalHistory.takeLast(5).forEach { point ->
+                                Text(
+                                    text = "${point.rssi}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = when {
+                                        point.rssi > -60 -> Color.Green
+                                        point.rssi > -80 -> Color.Yellow
+                                        else -> Color.Red
+                                    },
+                                    modifier = Modifier.padding(horizontal = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.size(16.dp))
+
             Text(
                 text = "Today's Activity",
                 style = MaterialTheme.typography.titleMedium,
@@ -277,6 +389,74 @@ fun RadarScreen(
                 )
             }
         }
+
+        // Device Timeline Section
+        vm.selectedDevice?.let { device ->
+            Spacer(modifier = Modifier.height(16.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp)
+                    .background(
+                        Color.White.copy(alpha = 0.05f),
+                        MaterialTheme.shapes.medium
+                    )
+                    .padding(12.dp)
+            ) {
+                Text(
+                    text = "Device Timeline: ${device.name}",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = Color.Green,
+                    modifier = Modifier.clickable { onDeviceClick(device) }
+                )
+                
+                val (riskText, riskColor) = when {
+                    device.riskScore > 50 -> "🔴 High Risk" to Color.Red
+                    device.riskScore > 20 -> "🟠 Medium Risk" to Color.Yellow
+                    else -> "🟢 Low Risk" to Color.Green
+                }
+                Text(
+                    text = riskText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = riskColor
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween
+                ) {
+                    TimelineItem(
+                        "First Seen", 
+                        DateUtils.getRelativeTimeSpanString(device.firstSeen).toString()
+                    )
+                    TimelineItem(
+                        "Last Seen", 
+                        DateUtils.getRelativeTimeSpanString(device.lastSeen).toString()
+                    )
+                    TimelineItem(
+                        "Seen", 
+                        "${device.timesSeen} Times"
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TimelineItem(label: String, value: String) {
+    Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White.copy(alpha = 0.6f)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.White
+        )
     }
 }
 

@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import com.sophia.ops.data.entities.WifiNetwork
 import com.sophia.ops.data.entities.BluetoothDeviceEntity
 import com.sophia.ops.data.entities.ScanSession
+import com.sophia.ops.data.entities.SignalPoint
 import com.sophia.ops.data.db.SophiaDatabase
 import com.sophia.ops.bluetooth.BluetoothScanner
 import com.sophia.ops.bluetooth.BluetoothRiskEngine
@@ -60,6 +61,13 @@ class DashboardViewModel(
 
     val networks = mutableStateListOf<WifiNetwork>()
     val bluetoothDevices = mutableStateListOf<BluetoothDeviceEntity>()
+    
+    var selectedDevice by mutableStateOf<BluetoothDeviceEntity?>(null)
+        private set
+
+    fun selectDevice(device: BluetoothDeviceEntity?) {
+        selectedDevice = device
+    }
     
     val historyCount: StateFlow<Int> = scanDao.getCount()
         .stateIn(
@@ -159,7 +167,7 @@ class DashboardViewModel(
         // Remove immediate clear to avoid UI flickering
         // bluetoothDevices.clear() 
         
-        bluetoothScanner.startDiscovery { device ->
+        bluetoothScanner.startDiscovery { device, rssi ->
             val name = getDisplayName(device)
             val risk = BluetoothRiskEngine.calculate(name)
             
@@ -168,6 +176,18 @@ class DashboardViewModel(
                     val existing = bluetoothDao.getDeviceByAddress(device.address)
                     val now = System.currentTimeMillis()
                     
+                    if (existing?.ignored == true) {
+                        // Ensure it's not in the UI list if it was marked as ignored elsewhere
+                        val uiIndex = bluetoothDevices.indexOfFirst { it.address == device.address }
+                        if (uiIndex != -1) {
+                            bluetoothDevices.removeAt(uiIndex)
+                        }
+                        return@launch
+                    }
+
+                    val newHistory = (existing?.signalHistory ?: emptyList()) + SignalPoint(rssi, now)
+                    val trimmedHistory = newHistory.takeLast(10)
+
                     @SuppressLint("MissingPermission")
                     val entity = if (existing == null) {
                         BluetoothDeviceEntity(
@@ -177,7 +197,9 @@ class DashboardViewModel(
                             firstSeen = now,
                             lastSeen = now,
                             riskScore = risk,
-                            timesSeen = 1
+                            rssi = rssi,
+                            timesSeen = 1,
+                            signalHistory = trimmedHistory
                         )
                     } else {
                         // Use the new name if it's not a generic fallback, otherwise keep existing
@@ -188,7 +210,9 @@ class DashboardViewModel(
                             name = finalName,
                             lastSeen = now,
                             riskScore = if (isNewNameReal) risk else existing.riskScore,
-                            timesSeen = existing.timesSeen + 1
+                            rssi = rssi,
+                            timesSeen = existing.timesSeen + 1,
+                            signalHistory = trimmedHistory
                         )
                     }
 
@@ -206,6 +230,10 @@ class DashboardViewModel(
                         bluetoothDevices[uiIndex] = entity
                     } else {
                         bluetoothDevices.add(entity)
+                    }
+
+                    if (selectedDevice?.address == entity.address) {
+                        selectedDevice = entity
                     }
                 } catch (e: Exception) {
                     Log.e("BT", "Database sync failed", e)
@@ -306,5 +334,36 @@ class DashboardViewModel(
 
         // 4. Fallback to generic label
         return "Discovered Device (${device.address.takeLast(5)})"
+    }
+
+    fun toggleFavourite(device: BluetoothDeviceEntity) {
+        viewModelScope.launch {
+            val newState = !device.favourite
+            bluetoothDao.updateFavourite(device.address, newState)
+            val index = bluetoothDevices.indexOfFirst { it.address == device.address }
+            if (index != -1) {
+                bluetoothDevices[index] = bluetoothDevices[index].copy(favourite = newState)
+            }
+        }
+    }
+
+    fun updateNickname(device: BluetoothDeviceEntity, nickname: String?) {
+        viewModelScope.launch {
+            bluetoothDao.updateNickname(device.address, nickname)
+            val index = bluetoothDevices.indexOfFirst { it.address == device.address }
+            if (index != -1) {
+                bluetoothDevices[index] = bluetoothDevices[index].copy(nickname = nickname)
+            }
+        }
+    }
+
+    fun updateNotes(device: BluetoothDeviceEntity, notes: String?) {
+        viewModelScope.launch {
+            bluetoothDao.updateNotes(device.address, notes)
+            val index = bluetoothDevices.indexOfFirst { it.address == device.address }
+            if (index != -1) {
+                bluetoothDevices[index] = bluetoothDevices[index].copy(notes = notes)
+            }
+        }
     }
 }

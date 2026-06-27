@@ -97,7 +97,12 @@ fun AppNavigation(
                 )
             }
             composable(Routes.RADAR) {
-                RadarScreen(vm = viewModel)
+                RadarScreen(
+                    vm = viewModel,
+                    onDeviceClick = { device ->
+                        navController.navigate("device_details/${device.address}")
+                    }
+                )
             }
             composable(Routes.DEVICES) {
                 val devicesVm: DevicesViewModel = viewModel()

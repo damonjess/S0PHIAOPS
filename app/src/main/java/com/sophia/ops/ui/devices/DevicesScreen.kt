@@ -5,6 +5,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -55,7 +58,11 @@ fun DevicesScreen(
         Box(modifier = Modifier.padding(padding)) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(devices) { device ->
-                    DeviceItem(device, onClick = { onDeviceClick(device) })
+                    DeviceItem(
+                        device = device,
+                        onClick = { onDeviceClick(device) },
+                        onFavouriteClick = { vm.toggleFavourite(device) }
+                    )
                 }
             }
 
@@ -98,37 +105,72 @@ fun DevicesScreen(
 }
 
 @Composable
-fun DeviceItem(device: BluetoothDeviceEntity, onClick: () -> Unit) {
+fun DeviceItem(
+    device: BluetoothDeviceEntity,
+    onClick: () -> Unit,
+    onFavouriteClick: () -> Unit
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(8.dp)
             .clickable(onClick = onClick)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
+        Row(
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
         ) {
-            Text(
-                text = device.name,
-                style = MaterialTheme.typography.titleLarge
-            )
-            Text(
-                text = getDeviceType(device.deviceType),
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.Gray
-            )
-            Text(
-                text = device.address,
-                style = MaterialTheme.typography.bodyMedium
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = device.nickname ?: device.name,
+                    style = MaterialTheme.typography.titleLarge
+                )
+                if (device.nickname != null) {
+                    Text(
+                        text = "Real Name: ${device.name}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray
+                    )
+                }
+                Text(
+                    text = getDeviceType(device.deviceType),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.Gray
+                )
+                Text(
+                    text = device.address,
+                    style = MaterialTheme.typography.bodyMedium
+                )
 
-            Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
-            Text(
-                text = "Risk: ${device.riskScore}",
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (device.riskScore > 30) Color.Red else if (device.riskScore > 0) Color.Yellow else Color.Green
-            )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Risk: ${device.riskScore}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (device.riskScore > 30) Color.Red else if (device.riskScore > 0) Color.Yellow else Color.Green
+                    )
+                    Text(
+                        text = "Seen ${device.timesSeen} Times",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray
+                    )
+                }
+            }
+
+            IconButton(onClick = onFavouriteClick) {
+                Icon(
+                    imageVector = if (device.favourite) Icons.Default.Star else Icons.Default.StarBorder,
+                    contentDescription = if (device.favourite) "Unfavourite" else "Favourite",
+                    tint = if (device.favourite) Color.Yellow else Color.Gray
+                )
+            }
         }
     }
 }
