@@ -20,11 +20,13 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.sophia.ops.ui.dashboard.DashboardScreen
+import com.sophia.ops.ui.devices.DeviceDetailsScreen
 import com.sophia.ops.ui.devices.DevicesScreen
 import com.sophia.ops.ui.history.HistoryScreen
 import com.sophia.ops.ui.radar.RadarScreen
 import com.sophia.ops.ui.settings.SettingsScreen
 import com.sophia.ops.viewmodel.DashboardViewModel
+import com.sophia.ops.viewmodel.DeviceDetailsViewModel
 import com.sophia.ops.viewmodel.DevicesViewModel
 import com.sophia.ops.viewmodel.HistoryViewModel
 
@@ -32,6 +34,7 @@ object Routes {
     const val DASHBOARD = "dashboard"
     const val RADAR = "radar"
     const val DEVICES = "devices"
+    const val DEVICE_DETAILS = "device_details/{address}"
     const val HISTORY = "history"
     const val SETTINGS = "settings"
 }
@@ -68,12 +71,11 @@ fun AppNavigation(
                         label = { Text(screen.label) },
                         selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
                         onClick = {
-                            navController.navigate(screen.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+                            if (currentDestination?.route != screen.route) {
+                                navController.navigate(screen.route) {
+                                    popUpTo(navController.graph.findStartDestination().id)
+                                    launchSingleTop = true
                                 }
-                                launchSingleTop = true
-                                restoreState = true
                             }
                         }
                     )
@@ -87,18 +89,37 @@ fun AppNavigation(
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(Routes.DASHBOARD) {
-                DashboardScreen(vm = viewModel)
+                DashboardScreen(
+                    vm = viewModel,
+                    onNavigateToRadar = { navController.navigate(Routes.RADAR) },
+                    onNavigateToDevices = { navController.navigate(Routes.DEVICES) },
+                    onNavigateToHistory = { navController.navigate(Routes.HISTORY) }
+                )
             }
             composable(Routes.RADAR) {
                 RadarScreen(vm = viewModel)
             }
             composable(Routes.DEVICES) {
                 val devicesVm: DevicesViewModel = viewModel()
-                DevicesScreen(vm = devicesVm)
+                DevicesScreen(
+                    vm = devicesVm,
+                    onDeviceClick = { device ->
+                        navController.navigate("device_details/${device.address}")
+                    }
+                )
             }
             composable(Routes.HISTORY) {
                 val historyVm: HistoryViewModel = viewModel()
                 HistoryScreen(vm = historyVm)
+            }
+            composable(Routes.DEVICE_DETAILS) { backStackEntry ->
+                val address = backStackEntry.arguments?.getString("address") ?: ""
+                val detailsVm: DeviceDetailsViewModel = viewModel()
+                DeviceDetailsScreen(
+                    address = address,
+                    vm = detailsVm,
+                    onBack = { navController.popBackStack() }
+                )
             }
             composable(Routes.SETTINGS) {
                 SettingsScreen()

@@ -3,6 +3,7 @@ package com.sophia.ops.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 import com.sophia.ops.data.db.SophiaDatabase
 import com.sophia.ops.data.entities.BluetoothDeviceEntity
 import kotlinx.coroutines.flow.SharingStarted
@@ -13,7 +14,7 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
     private val db = androidx.room.Room.databaseBuilder(
         application,
         SophiaDatabase::class.java, "sophia-db"
-    ).build()
+    ).fallbackToDestructiveMigration().build()
 
     private val bluetoothDao = db.bluetoothDao()
 
@@ -23,4 +24,10 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
         )
+
+    fun clearDevices() {
+        viewModelScope.launch {
+            bluetoothDao.deleteAllDevices()
+        }
+    }
 }

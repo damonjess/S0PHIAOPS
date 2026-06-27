@@ -15,7 +15,7 @@ import com.sophia.ops.data.entities.ScanSession
         BluetoothDeviceEntity::class,
         ScanSession::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class SophiaDatabase : RoomDatabase() {

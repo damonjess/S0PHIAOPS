@@ -12,5 +12,6 @@ data class BluetoothDeviceEntity(
     val deviceType: Int,
     val firstSeen: Long,
     val lastSeen: Long,
-    val riskScore: Int
+    val riskScore: Int,
+    val timesSeen: Int = 1
 )

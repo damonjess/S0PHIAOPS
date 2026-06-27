@@ -11,7 +11,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -27,6 +29,9 @@ import java.util.*
 fun HistoryScreen(vm: HistoryViewModel) {
     val history by vm.sessions.collectAsState()
     val context = LocalContext.current
+    var showClearHistoryDialog by remember {
+        mutableStateOf(false)
+    }
 
     Scaffold(
         topBar = {
@@ -67,6 +72,14 @@ fun HistoryScreen(vm: HistoryViewModel) {
                         ) {
                             Text("Export CSV")
                         }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                showClearHistoryDialog = true
+                            }
+                        ) {
+                            Text("Clear History")
+                        }
                     }
                 }
             }
@@ -75,6 +88,41 @@ fun HistoryScreen(vm: HistoryViewModel) {
                 HistoryItem(session)
             }
         }
+    }
+
+    if (showClearHistoryDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showClearHistoryDialog = false
+            },
+            title = {
+                Text("Clear Scan History")
+            },
+            text = {
+                Text(
+                    "This will permanently remove all scan history."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.clearHistory()
+                        showClearHistoryDialog = false
+                    }
+                ) {
+                    Text("Clear")
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = {
+                        showClearHistoryDialog = false
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 

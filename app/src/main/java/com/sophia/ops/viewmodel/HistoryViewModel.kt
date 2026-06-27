@@ -13,9 +13,11 @@ import com.sophia.ops.data.entities.ScanSession
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
+import android.util.Log
 import java.io.FileOutputStream
 import java.io.File
 import java.text.SimpleDateFormat
@@ -27,9 +29,9 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         SophiaDatabase::class.java, "sophia-db"
     ).fallbackToDestructiveMigration().build()
 
-    private val scanDao = db.scanSessionDao()
+    private val scanSessionDao = db.scanSessionDao()
 
-    val sessions: StateFlow<List<ScanSession>> = scanDao.getAll()
+    val sessions: StateFlow<List<ScanSession>> = scanSessionDao.getAll()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -37,18 +39,27 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         )
 
     fun exportCsv(context: Context) {
+        if (sessions.value.isEmpty()) {
+            Log.d(
+                "CSV_EXPORT",
+                "No scan history to export."
+            )
+            return
+        }
         val sessionList = sessions.value
-        if (sessionList.isEmpty()) return
 
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
         val csvHeader = "Date,WiFi,Bluetooth,Threat\n"
         val csvData = sessionList.joinToString("\n") { 
             "${sdf.format(Date(it.timestamp))},${it.wifiCount},${it.bluetoothCount},${it.threatScore}" 
         }
+        val csvContent = csvHeader + csvData
         
-        val fileName = "sophia_ops_history_${System.currentTimeMillis()}.csv"
-        val file = File(context.cacheDir, fileName)
-        file.writeText(csvHeader + csvData)
+        val file = File(
+            context.cacheDir,
+            "SophiaOps_History.csv"
+        )
+        file.writeText(csvContent)
 
         shareFile(context, file, "text/csv")
     }
@@ -110,17 +121,53 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun shareFile(context: Context, file: File, mimeType: String) {
-        val uri: Uri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.provider",
-            file
-        )
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = mimeType
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    private fun shareFile(
+        context: Context,
+        file: File,
+        mimeType: String
+    ) {
+        try {
+
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.provider",
+                file
+            )
+
+            val intent = Intent(Intent.ACTION_SEND).apply {
+
+                type = mimeType
+
+                putExtra(
+                    Intent.EXTRA_STREAM,
+                    uri
+                )
+
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+
+            context.startActivity(
+                Intent.createChooser(
+                    intent,
+                    "Share Report"
+                )
+            )
+
+        } catch (e: Exception) {
+
+            Log.e(
+                "CSV_EXPORT",
+                "Failed to export CSV",
+                e
+            )
         }
-        context.startActivity(Intent.createChooser(intent, "Share Report"))
+    }
+
+    fun clearHistory() {
+        viewModelScope.launch {
+            scanSessionDao.deleteAllSessions()
+        }
     }
 }

@@ -19,4 +19,13 @@ interface ScanSessionDao {
     )
     fun getAll():
         Flow<List<ScanSession>>
+
+    @Query("DELETE FROM scan_sessions")
+    suspend fun deleteAllSessions()
+
+    @Query("SELECT COUNT(*) FROM scan_sessions")
+    fun getCount(): Flow<Int>
+
+    @Query("SELECT * FROM scan_sessions WHERE timestamp >= :since ORDER BY timestamp DESC")
+    fun getSessionsSince(since: Long): Flow<List<ScanSession>>
 }

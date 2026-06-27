@@ -23,7 +23,15 @@ import androidx.room.Room
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import kotlin.random.Random
 
 class DashboardViewModel(
@@ -42,7 +50,9 @@ class DashboardViewModel(
     
     private val scanner = WifiScanner(getApplication())
     private val bluetoothScanner = BluetoothScanner(getApplication())
-    private var isScanning = false
+    var isScanning by mutableStateOf(false)
+        private set
+
     private var autoRefreshJob: Job? = null
     
     private var lastScanRequestTime = 0L
@@ -51,15 +61,74 @@ class DashboardViewModel(
     val networks = mutableStateListOf<WifiNetwork>()
     val bluetoothDevices = mutableStateListOf<BluetoothDeviceEntity>()
     
-    val totalThreatScore: Int
-        get() = (networks.size + bluetoothDevices.size).coerceIn(0, 100)
+    val historyCount: StateFlow<Int> = scanDao.getCount()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = 0
+        )
+
+    private val startOfDay: Long
+        get() = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+    val todaySessions: StateFlow<List<ScanSession>> = scanDao.getSessionsSince(startOfDay)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    val scansToday: StateFlow<Int> = todaySessions
+        .map { it.size }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val wifiFoundToday: StateFlow<Int> = todaySessions
+        .map { it.sumOf { s -> s.wifiCount } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val bluetoothFoundToday: StateFlow<Int> = todaySessions
+        .map { it.sumOf { s -> s.bluetoothCount } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val highestThreatToday: StateFlow<String> = todaySessions
+        .map { sessions ->
+            val maxScore = sessions.maxOfOrNull { it.threatScore } ?: 0
+            when {
+                maxScore > 50 -> "HIGH"
+                maxScore > 20 -> "MEDIUM"
+                maxScore > 0 -> "LOW"
+                else -> "NONE"
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "NONE")
     
+    val threatScore: Int
+        get() = (networks.size + bluetoothDevices.size).coerceIn(0, 100)
+
+    val threatLevel: String
+        get() = when (threatScore) {
+            in 0..20 -> "LOW"
+            in 21..50 -> "MEDIUM"
+            else -> "HIGH"
+        }
+
     // UI indicator for throttling
     var isThrottled by mutableStateOf(false)
         private set
 
     var lastScanWasLive by mutableStateOf(false)
         private set
+
+    var lastScanTime by mutableStateOf("Never")
+        private set
+
+    val status: String
+        get() = if (lastScanWasLive) "🟢 LIVE" else "🟠 THROTTLED"
 
     fun startAutoRefresh(intervalMs: Long) {
         if (autoRefreshJob != null) return
@@ -84,66 +153,64 @@ class DashboardViewModel(
         isScanning = true
         Log.i(tag, "Initiating scan at $now...")
         
+        val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+        lastScanTime = sdf.format(Date(now))
+        
         // Remove immediate clear to avoid UI flickering
         // bluetoothDevices.clear() 
         
         bluetoothScanner.startDiscovery { device ->
             val name = getDisplayName(device)
-            Log.d("BT", "Adding device: ${device.address} ($name)")
             val risk = BluetoothRiskEngine.calculate(name)
             
-            val existingIndex = bluetoothDevices.indexOfFirst { it.address == device.address }
-            if (existingIndex != -1) {
-                val existingDevice = bluetoothDevices[existingIndex]
-                
-                // Update existing device
-                val updatedDevice = existingDevice.copy(
-                    name = name,
-                    lastSeen = System.currentTimeMillis(),
-                    riskScore = risk
-                )
-                bluetoothDevices[existingIndex] = updatedDevice
-
-                viewModelScope.launch {
-                    try {
-                        @SuppressLint("MissingPermission")
-                        val newRealName = device.name
-                        if (existingDevice.name.startsWith("Discovered Device") && !newRealName.isNullOrBlank()) {
-                            bluetoothDao.updateName(existingDevice.id, newRealName)
-                            Log.d("BT", "Updated generic name to: $newRealName")
-                        }
+            viewModelScope.launch {
+                try {
+                    val existing = bluetoothDao.getDeviceByAddress(device.address)
+                    val now = System.currentTimeMillis()
+                    
+                    @SuppressLint("MissingPermission")
+                    val entity = if (existing == null) {
+                        BluetoothDeviceEntity(
+                            name = name,
+                            address = device.address,
+                            deviceType = device.type,
+                            firstSeen = now,
+                            lastSeen = now,
+                            riskScore = risk,
+                            timesSeen = 1
+                        )
+                    } else {
+                        // Use the new name if it's not a generic fallback, otherwise keep existing
+                        val isNewNameReal = !name.startsWith("Discovered Device")
+                        val finalName = if (isNewNameReal) name else existing.name
                         
-                        // Also update lastSeen and risk regardless
-                        bluetoothDao.insert(updatedDevice)
-                    } catch (e: Exception) {
-                        Log.e("BT", "Failed to update DB", e)
+                        existing.copy(
+                            name = finalName,
+                            lastSeen = now,
+                            riskScore = if (isNewNameReal) risk else existing.riskScore,
+                            timesSeen = existing.timesSeen + 1
+                        )
                     }
-                }
-            } else {
-                // Add new device
-                @SuppressLint("MissingPermission")
-                val entity = BluetoothDeviceEntity(
-                    name = name,
-                    address = device.address,
-                    deviceType = device.type, 
-                    firstSeen = System.currentTimeMillis(),
-                    lastSeen = System.currentTimeMillis(),
-                    riskScore = risk
-                )
-                bluetoothDevices.add(entity)
-                
-                // Save to database
-                viewModelScope.launch {
-                    try {
+
+                    if (existing == null) {
                         bluetoothDao.insert(entity)
-                        Log.d("BT", "Device persisted to DB: ${entity.address}")
-                    } catch (e: Exception) {
-                        Log.e("BT", "Failed to save to DB", e)
+                        Log.d("BT", "New device persisted: ${entity.address}")
+                    } else {
+                        bluetoothDao.updateDevice(entity)
+                        Log.d("BT", "Existing device updated: ${entity.address}")
                     }
+
+                    // Sync with UI list
+                    val uiIndex = bluetoothDevices.indexOfFirst { it.address == device.address }
+                    if (uiIndex != -1) {
+                        bluetoothDevices[uiIndex] = entity
+                    } else {
+                        bluetoothDevices.add(entity)
+                    }
+                } catch (e: Exception) {
+                    Log.e("BT", "Database sync failed", e)
                 }
             }
-
-            Log.d("BT", "Total devices in VM: ${bluetoothDevices.size}")
         }
         
         scanner.startScan { results ->
@@ -185,7 +252,7 @@ class DashboardViewModel(
                     timestamp = System.currentTimeMillis(),
                     wifiCount = networks.size,
                     bluetoothCount = bluetoothDevices.size,
-                    threatScore = totalThreatScore
+                    threatScore = threatScore
                 )
                 scanDao.insert(session)
                 Log.d(tag, "Scan session saved: ${session.threatScore} threat score")
