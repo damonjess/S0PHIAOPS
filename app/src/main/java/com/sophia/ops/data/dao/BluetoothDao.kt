@@ -46,4 +46,7 @@ interface BluetoothDao {
 
     @Query("DELETE FROM bluetooth_devices")
     suspend fun deleteAllDevices()
+
+    @Query("SELECT COUNT(*) FROM bluetooth_devices")
+    fun getCount(): Flow<Int>
 }

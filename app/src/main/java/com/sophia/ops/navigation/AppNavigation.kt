@@ -2,6 +2,7 @@ package com.sophia.ops.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.History
@@ -25,10 +26,12 @@ import com.sophia.ops.ui.devices.DevicesScreen
 import com.sophia.ops.ui.history.HistoryScreen
 import com.sophia.ops.ui.radar.RadarScreen
 import com.sophia.ops.ui.settings.SettingsScreen
+import com.sophia.ops.ui.statistics.StatisticsScreen
 import com.sophia.ops.viewmodel.DashboardViewModel
 import com.sophia.ops.viewmodel.DeviceDetailsViewModel
 import com.sophia.ops.viewmodel.DevicesViewModel
 import com.sophia.ops.viewmodel.HistoryViewModel
+import com.sophia.ops.viewmodel.StatisticsViewModel
 
 object Routes {
     const val DASHBOARD = "dashboard"
@@ -36,6 +39,7 @@ object Routes {
     const val DEVICES = "devices"
     const val DEVICE_DETAILS = "device_details/{address}"
     const val HISTORY = "history"
+    const val STATISTICS = "statistics"
     const val SETTINGS = "settings"
 }
 
@@ -44,6 +48,7 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     object Radar : Screen(Routes.RADAR, "Radar", Icons.Default.Radar)
     object Devices : Screen(Routes.DEVICES, "Devices", Icons.Default.Devices)
     object History : Screen(Routes.HISTORY, "History", Icons.Default.History)
+    object Statistics : Screen(Routes.STATISTICS, "Statistics", Icons.Default.BarChart)
     object Settings : Screen(Routes.SETTINGS, "Settings", Icons.Default.Settings)
 }
 
@@ -57,6 +62,7 @@ fun AppNavigation(
         Screen.Radar,
         Screen.Devices,
         Screen.History,
+        Screen.Statistics,
         Screen.Settings
     )
 
@@ -116,6 +122,10 @@ fun AppNavigation(
             composable(Routes.HISTORY) {
                 val historyVm: HistoryViewModel = viewModel()
                 HistoryScreen(vm = historyVm)
+            }
+            composable(Routes.STATISTICS) {
+                val statsVm: StatisticsViewModel = viewModel()
+                StatisticsScreen(vm = statsVm)
             }
             composable(Routes.DEVICE_DETAILS) { backStackEntry ->
                 val address = backStackEntry.arguments?.getString("address") ?: ""

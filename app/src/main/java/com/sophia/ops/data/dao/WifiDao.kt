@@ -14,8 +14,14 @@ interface WifiDao {
         network: WifiNetwork
     )
 
+    @Insert
+    suspend fun insertAll(networks: List<WifiNetwork>)
+
     @Query(
         "SELECT * FROM wifi_networks ORDER BY timestamp DESC"
     )
     fun getAll(): Flow<List<WifiNetwork>>
+
+    @Query("SELECT COUNT(*) FROM wifi_networks")
+    fun getCount(): Flow<Int>
 }

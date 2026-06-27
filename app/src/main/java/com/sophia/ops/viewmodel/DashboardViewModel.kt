@@ -48,6 +48,7 @@ class DashboardViewModel(
     
     private val bluetoothDao = db.bluetoothDao()
     private val scanDao = db.scanSessionDao()
+    private val wifiDao = db.wifiDao()
     
     private val scanner = WifiScanner(getApplication())
     private val bluetoothScanner = BluetoothScanner(getApplication())
@@ -268,25 +269,30 @@ class DashboardViewModel(
             networks.clear()
             networks.addAll(updatedList)
 
-            // Save scan session summary
-            saveScanSession()
+            // Save scan session and networks
+            viewModelScope.launch {
+                try {
+                    wifiDao.insertAll(updatedList)
+                    saveScanSession()
+                } catch (e: Exception) {
+                    Log.e(tag, "Failed to persist WiFi networks", e)
+                }
+            }
         }
     }
 
-    private fun saveScanSession() {
-        viewModelScope.launch {
-            try {
-                val session = ScanSession(
-                    timestamp = System.currentTimeMillis(),
-                    wifiCount = networks.size,
-                    bluetoothCount = bluetoothDevices.size,
-                    threatScore = threatScore
-                )
-                scanDao.insert(session)
-                Log.d(tag, "Scan session saved: ${session.threatScore} threat score")
-            } catch (e: Exception) {
-                Log.e(tag, "Failed to save scan session", e)
-            }
+    private suspend fun saveScanSession() {
+        try {
+            val session = ScanSession(
+                timestamp = System.currentTimeMillis(),
+                wifiCount = networks.size,
+                bluetoothCount = bluetoothDevices.size,
+                threatScore = threatScore
+            )
+            scanDao.insert(session)
+            Log.d(tag, "Scan session saved: ${session.threatScore} threat score")
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to save scan session", e)
         }
     }
 

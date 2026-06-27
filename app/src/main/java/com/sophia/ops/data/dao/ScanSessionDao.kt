@@ -28,4 +28,7 @@ interface ScanSessionDao {
 
     @Query("SELECT * FROM scan_sessions WHERE timestamp >= :since ORDER BY timestamp DESC")
     fun getSessionsSince(since: Long): Flow<List<ScanSession>>
+
+    @Query("SELECT * FROM scan_sessions ORDER BY timestamp DESC LIMIT 1")
+    fun getLatestSession(): Flow<ScanSession?>
 }
