@@ -5,6 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.sophia.ops.data.dao.BluetoothDao
 import com.sophia.ops.data.dao.WifiDao
 import com.sophia.ops.data.dao.ScanSessionDao

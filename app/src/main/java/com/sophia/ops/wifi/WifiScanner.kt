@@ -1,5 +1,6 @@
 package com.sophia.ops.wifi
 
+import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -19,6 +20,7 @@ class WifiScanner(
             .getSystemService(Context.WIFI_SERVICE)
                 as WifiManager
 
+    @SuppressLint("MissingPermission")
     fun startScan(
         onResults: (List<ScanResult>) -> Unit
     ) {

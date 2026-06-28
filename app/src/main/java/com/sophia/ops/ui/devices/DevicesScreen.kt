@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sophia.ops.model.DeviceType
 import com.sophia.ops.model.NetworkDevice
+import com.sophia.ops.data.utils.OuiLookupEngine
 import com.sophia.ops.viewmodel.DevicesViewModel
 
 @Composable
@@ -419,13 +420,15 @@ fun DeviceItem(
                     color = Color.LightGray
                 )
 
-                device.vendor?.let { vendor ->
-                    Text(
-                        text = "Vendor: $vendor",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Cyan
-                    )
+                val cleanVendorName = remember(device.address) {
+                    OuiLookupEngine.resolveVendor(device.address)
                 }
+
+                Text(
+                    text = "Vendor: $cleanVendorName",
+                    color = Color(0xFF00BCD4),
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
 
             Text(

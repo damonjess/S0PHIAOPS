@@ -15,6 +15,8 @@ import com.sophia.ops.data.entities.SignalPoint
 import com.sophia.ops.data.db.SophiaDatabase
 import com.sophia.ops.bluetooth.BluetoothScanner
 import com.sophia.ops.bluetooth.BluetoothRiskEngine
+import com.sophia.ops.ai.CyberDefenseAnalyst
+import com.sophia.ops.ai.SecureActionAgent
 import com.sophia.ops.wifi.RiskEngine
 import com.sophia.ops.wifi.WifiScanner
 import android.util.Log
@@ -66,6 +68,42 @@ class DashboardViewModel(
     
     var selectedDevice by mutableStateOf<BluetoothDeviceEntity?>(null)
         private set
+
+    var aiResponse by mutableStateOf<String?>(null)
+        private set
+
+    var isAnalyzing by mutableStateOf(false)
+        private set
+
+    var strategicBrief by mutableStateOf<String?>(null)
+        private set
+
+    private var actionAgent: SecureActionAgent? = null
+
+    fun analyzeThreat() {
+        if (isAnalyzing) return
+        viewModelScope.launch {
+            isAnalyzing = true
+            
+            val deviceCount = networks.size + bluetoothDevices.size
+            
+            // Standard analysis
+            aiResponse = CyberDefenseAnalyst.analyzeThreat(threatScore, deviceCount)
+            
+            // Strategic brief for high-threat scenarios (> 70%)
+            if (threatScore > 70) {
+                if (actionAgent == null) {
+                    actionAgent = SecureActionAgent(getApplication(), "/data/local/tmp/gemma-2b.bin")
+                }
+                val telemetry = "Detected abnormal signal density. $deviceCount distinct traces found in proximity."
+                strategicBrief = actionAgent?.analyzeThreatBrief(threatScore, telemetry)
+            } else {
+                strategicBrief = null
+            }
+
+            isAnalyzing = false
+        }
+    }
 
     fun selectDevice(device: BluetoothDeviceEntity?) {
         selectedDevice = device
@@ -149,6 +187,11 @@ class DashboardViewModel(
                 delay(intervalMs)
             }
         }
+    }
+
+    fun stopAutoRefresh() {
+        autoRefreshJob?.cancel()
+        autoRefreshJob = null
     }
 
     fun scan() {
@@ -288,6 +331,9 @@ class DashboardViewModel(
                 try {
                     wifiDao.insertAll(updatedList)
                     saveScanSession()
+                    if (threatScore > 50) {
+                        analyzeThreat()
+                    }
                 } catch (e: Exception) {
                     Log.e(tag, "Failed to persist WiFi networks", e)
                 } finally {

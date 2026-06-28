@@ -16,9 +16,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.sophia.ops.data.utils.OuiLookupEngine
 import com.sophia.ops.data.entities.BluetoothDeviceEntity
 import com.sophia.ops.data.entities.WifiNetwork
 import com.sophia.ops.viewmodel.DeviceDetailsViewModel
@@ -106,7 +108,7 @@ fun BluetoothDetails(address: String, vm: DeviceDetailsViewModel, onBack: () -> 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 DetailRow("Full MAC", device.address)
-                DetailRow("Manufacturer", getManufacturer(device.address))
+                DetailRow("Manufacturer", OuiLookupEngine.resolveVendor(device.address))
                 DetailRow("First Seen", formatTimestamp(device.firstSeen))
                 DetailRow("Last Seen", formatTimestamp(device.lastSeen))
                 DetailRow("Signal", "${device.rssi} dBm")
@@ -262,7 +264,7 @@ fun WifiDetails(address: String, vm: DeviceDetailsViewModel, onBack: () -> Unit)
                 Spacer(modifier = Modifier.height(16.dp))
 
                 DetailRow("Full BSSID (MAC)", network.bssid)
-                DetailRow("Manufacturer", getManufacturer(network.bssid))
+                DetailRow("Manufacturer", OuiLookupEngine.resolveVendor(network.bssid))
                 DetailRow("Security", network.security)
                 DetailRow("Last Seen", formatTimestamp(network.timestamp))
                 DetailRow("Signal", "${network.signal} dBm")
@@ -286,16 +288,6 @@ private fun formatTimestamp(timestamp: Long): String {
     return DateUtils.getRelativeDateTimeString(
         null, timestamp, DateUtils.MINUTE_IN_MILLIS, DateUtils.WEEK_IN_MILLIS, 0
     ).toString()
-}
-
-private fun getManufacturer(mac: String): String {
-    // Basic OUI lookup or placeholder
-    return when {
-        mac.startsWith("00:1A:11", true) -> "Google"
-        mac.startsWith("00:25:00", true) -> "Apple"
-        mac.startsWith("FC:EC:DA", true) -> "Ubiquiti"
-        else -> "Unknown Manufacturer"
-    }
 }
 
 private fun getSignalColor(rssi: Int): Color {

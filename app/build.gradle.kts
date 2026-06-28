@@ -54,8 +54,12 @@ dependencies {
 
     implementation("androidx.navigation:navigation-compose:2.9.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.0")
     implementation("androidx.room:room-runtime:2.7.0")
     implementation("androidx.room:room-ktx:2.7.0")
     ksp("androidx.room:room-compiler:2.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+
+    // For local, on-device Large Language Model inference
+    implementation("com.google.mediapipe:tasks-genai:0.10.27")
 }

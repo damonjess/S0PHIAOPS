@@ -1,10 +1,18 @@
 package com.sophia.ops.ui.radar
 
 import android.text.format.DateUtils
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,27 +27,32 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.sophia.ops.data.entities.BluetoothDeviceEntity
+import com.sophia.ops.data.utils.OuiLookupEngine
 import com.sophia.ops.viewmodel.DashboardViewModel
-import kotlinx.coroutines.delay
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -48,19 +61,22 @@ fun RadarScreen(
     vm: DashboardViewModel,
     onDeviceClick: (BluetoothDeviceEntity) -> Unit = {}
 ) {
-    var sweepAngle by remember {
-        mutableFloatStateOf(0f)
-    }
+    val infiniteTransition = rememberInfiniteTransition(label = "RadarSweep")
+    val sweepAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "SweepAngle"
+    )
 
-    LaunchedEffect(Unit) {
-        while (true) {
-            sweepAngle += 3f
-            delay(16)
-        }
-    }
-
-    LaunchedEffect(Unit) {
+    DisposableEffect(vm) {
         vm.startAutoRefresh(5000)
+        onDispose {
+            vm.stopAutoRefresh()
+        }
     }
 
     val scansToday by vm.scansToday.collectAsState()
@@ -82,6 +98,7 @@ fun RadarScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
+            .verticalScroll(rememberScrollState())
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -151,115 +168,142 @@ fun RadarScreen(
             LegendItem("Fav", Color.Yellow)
         }
 
-        androidx.compose.foundation.Canvas(
+        val density = LocalDensity.current
+        Spacer(
             modifier = Modifier
-                .weight(1f)
+                .height(400.dp) // Fixed height for radar when scrolling
                 .fillMaxWidth()
-        ) {
-            val center = Offset(size.width / 2, size.height / 2)
-            val maxRadius = size.minDimension / 2
+                .pointerInput(vm.networks, vm.bluetoothDevices) {
+                    detectTapGestures { offset ->
+                        val centerX = size.width / 2f
+                        val centerY = size.height / 2f
+                        val minDim = minOf(size.width, size.height).toFloat()
+                        val threshold = with(density) { 24.dp.toPx() }
 
-            // Draw concentric circles
-            val circleCount = 4
-            for (i in 1..circleCount) {
-                drawCircle(
-                    color = Color.Green.copy(alpha = 0.3f),
-                    radius = maxRadius * (i.toFloat() / circleCount),
-                    center = center,
-                    style = Stroke(width = 2f)
-                )
-            }
+                        // Check Bluetooth devices for taps
+                        vm.bluetoothDevices.forEach { device ->
+                            val normalized = ((device.rssi + 100).coerceIn(0, 100)).toFloat() / 100f
+                            val radius = (minDim / 2.2f) * (1f - normalized)
+                            val angle = (device.address.hashCode().toFloat() % 360) * (Math.PI / 180).toFloat()
+                            val x = centerX + radius * cos(angle)
+                            val y = centerY + radius * sin(angle)
 
-            // Draw radar lines
-            drawLine(
-                color = Color.Green.copy(alpha = 0.3f),
-                start = Offset(center.x - maxRadius, center.y),
-                end = Offset(center.x + maxRadius, center.y),
-                strokeWidth = 2f
-            )
-            drawLine(
-                color = Color.Green.copy(alpha = 0.3f),
-                start = Offset(center.x, center.y - maxRadius),
-                end = Offset(center.x, center.y + maxRadius),
-                strokeWidth = 2f
-            )
-
-            // Draw sweep line
-            val sweepRad = (sweepAngle * Math.PI / 180).toFloat()
-            val sweepX = center.x + maxRadius * cos(sweepRad)
-            val sweepY = center.y + maxRadius * sin(sweepRad)
-
-            drawLine(
-                color = Color.Green.copy(alpha = 0.5f),
-                start = center,
-                end = Offset(sweepX, sweepY),
-                strokeWidth = 4f
-            )
-
-            // Draw network points
-            vm.networks.forEach { network ->
-                val normalized =
-                    ((network.signal + 100)
-                        .coerceIn(0, 100))
-                        .toFloat() / 100f
-
-                val radius =
-                    (size.minDimension / 2.2f) *
-                    (1f - normalized)
-
-                val baseAngle = (network.bssid.hashCode().toFloat() % 360)
-                val angle = (baseAngle + network.angularOffset) * (Math.PI / 180).toFloat()
-
-                val x = center.x + radius * cos(angle)
-                val y = center.y + radius * sin(angle)
-
-                // Color based on risk score (0 = Green, 100 = Red)
-                val color = Color(
-                    red = (network.riskScore / 100f).coerceIn(0f, 1f),
-                    green = (1f - (network.riskScore / 100f)).coerceIn(0f, 1f),
-                    blue = 0f
-                )
-
-                drawCircle(
-                    color = color,
-                    radius = 8.dp.toPx(),
-                    center = Offset(x, y)
-                )
-            }
-
-            // Draw Bluetooth devices
-            vm.bluetoothDevices.forEach { device ->
-                val normalized =
-                    ((device.rssi + 100)
-                        .coerceIn(0, 100))
-                        .toFloat() / 100f
-
-                val radius =
-                    (size.minDimension / 2.2f) *
-                    (1f - normalized)
-                    
-                val angle = (device.address.hashCode().toFloat() % 360) * (Math.PI / 180).toFloat()
-
-                val x = center.x + radius * cos(angle)
-                val y = center.y + radius * sin(angle)
-
-                val color = if (device.favourite) {
-                    Color.Yellow
-                } else {
-                    Color(
-                        red = (device.riskScore / 100f).coerceIn(0f, 1f),
-                        green = 0f,
-                        blue = (1f - (device.riskScore / 100f)).coerceIn(0.5f, 1f)
-                    )
+                            val dx = offset.x - x
+                            val dy = offset.y - y
+                            if (dx * dx + dy * dy < threshold * threshold) {
+                                vm.selectDevice(device)
+                                return@detectTapGestures
+                            }
+                        }
+                    }
                 }
+                .drawBehind {
+                    val center = Offset(size.width / 2, size.height / 2)
+                    val maxRadius = size.minDimension / 2
 
-                drawCircle(
-                    color = color,
-                    radius = if (device.favourite) 8.dp.toPx() else 6.dp.toPx(),
-                    center = Offset(x, y)
-                )
-            }
-        }
+                    // Draw concentric circles
+                    val circleCount = 4
+                    for (i in 1..circleCount) {
+                        drawCircle(
+                            color = Color.Green.copy(alpha = 0.3f),
+                            radius = maxRadius * (i.toFloat() / circleCount),
+                            center = center,
+                            style = Stroke(width = 2f)
+                        )
+                    }
+
+                    // Draw radar lines
+                    drawLine(
+                        color = Color.Green.copy(alpha = 0.3f),
+                        start = Offset(center.x - maxRadius, center.y),
+                        end = Offset(center.x + maxRadius, center.y),
+                        strokeWidth = 2f
+                    )
+                    drawLine(
+                        color = Color.Green.copy(alpha = 0.3f),
+                        start = Offset(center.x, center.y - maxRadius),
+                        end = Offset(center.x, center.y + maxRadius),
+                        strokeWidth = 2f
+                    )
+
+                    // Draw sweep line
+                    val sweepRad = (sweepAngle * Math.PI / 180).toFloat()
+                    val sweepX = center.x + maxRadius * cos(sweepRad)
+                    val sweepY = center.y + maxRadius * sin(sweepRad)
+
+                    drawLine(
+                        color = Color.Green.copy(alpha = 0.5f),
+                        start = center,
+                        end = Offset(sweepX, sweepY),
+                        strokeWidth = 4f
+                    )
+
+                    // Draw network points
+                    vm.networks.forEach { network ->
+                        val normalized =
+                            ((network.signal + 100)
+                                .coerceIn(0, 100))
+                                .toFloat() / 100f
+
+                        val radius =
+                            (size.minDimension / 2.2f) *
+                            (1f - normalized)
+
+                        val baseAngle = (network.bssid.hashCode().toFloat() % 360)
+                        val angle = (baseAngle + network.angularOffset) * (Math.PI / 180).toFloat()
+
+                        val x = center.x + radius * cos(angle)
+                        val y = center.y + radius * sin(angle)
+
+                        // Color based on risk score (0 = Green, 100 = Red)
+                        val color = Color(
+                            red = (network.riskScore / 100f).coerceIn(0f, 1f),
+                            green = (1f - (network.riskScore / 100f)).coerceIn(0f, 1f),
+                            blue = 0f
+                        )
+
+                        drawCircle(
+                            color = color,
+                            radius = 8.dp.toPx(),
+                            center = Offset(x, y)
+                        )
+                    }
+
+                    // Draw Bluetooth devices
+                    vm.bluetoothDevices.forEach { device ->
+                        val normalized =
+                            ((device.rssi + 100)
+                                .coerceIn(0, 100))
+                                .toFloat() / 100f
+
+                        val radius =
+                            (size.minDimension / 2.2f) *
+                            (1f - normalized)
+                            
+                        val angle = (device.address.hashCode().toFloat() % 360) * (Math.PI / 180).toFloat()
+
+                        val x = center.x + radius * cos(angle)
+                        val y = center.y + radius * sin(angle)
+
+                        val color = if (device.favourite) {
+                            Color.Yellow
+                        } else {
+                            Color(
+                                red = (device.riskScore / 100f).coerceIn(0f, 1f),
+                                green = 0f,
+                                blue = (1f - (device.riskScore / 100f)).coerceIn(0.5f, 1f)
+                            )
+                        }
+
+                        drawCircle(
+                            color = color,
+                            radius = if (device.favourite) 8.dp.toPx() else 6.dp.toPx(),
+                            center = Offset(x, y)
+                        )
+                    }
+                }
+        )
+
 
         // Today's Activity Section
         Column(
@@ -433,6 +477,15 @@ fun RadarScreen(
                         color = Color.Gray
                     )
                     
+                    val vendorName = remember(device.address) {
+                        OuiLookupEngine.resolveVendor(device.address)
+                    }
+                    Text(
+                        text = "Vendor: $vendorName",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF00BCD4)
+                    )
+                    
                     val (riskText, riskColor) = when {
                         device.riskScore > 50 -> "🔴 High Risk" to Color.Red
                         device.riskScore > 20 -> "🟠 Medium Risk" to Color.Yellow
@@ -462,6 +515,91 @@ fun RadarScreen(
                             "${device.timesSeen} Times"
                         )
                     }
+                }
+            }
+        }
+
+        // AI Analyst Section
+        if (vm.aiResponse != null || vm.isAnalyzing) {
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Cyber Analyst Countermeasures",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.Green
+                )
+                if (!vm.isAnalyzing) {
+                    Text(
+                        text = "Refresh",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Green,
+                        modifier = Modifier.clickable { vm.analyzeThreat() }
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color.Red.copy(alpha = 0.1f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    if (vm.isAnalyzing) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = Color.Green,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "Analyzing signals and generating strategies...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = vm.aiResponse ?: "",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+        }
+
+        // Strategic Brief Section (High Threat Alert)
+        if (vm.strategicBrief != null) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "TACTICAL STRATEGIC BRIEF",
+                style = MaterialTheme.typography.titleSmall,
+                color = Color.Red,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(2.dp, Color.Red),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color.Black
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = vm.strategicBrief ?: "",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = Color.White,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }
