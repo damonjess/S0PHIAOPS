@@ -24,10 +24,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 class HistoryViewModel(application: Application) : AndroidViewModel(application) {
-    private val db = Room.databaseBuilder(
-        application,
-        SophiaDatabase::class.java, "sophia-db"
-    ).fallbackToDestructiveMigration().build()
+    private val db = SophiaDatabase.getInstance(application)
 
     private val scanSessionDao = db.scanSessionDao()
 

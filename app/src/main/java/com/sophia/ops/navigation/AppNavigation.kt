@@ -37,7 +37,7 @@ object Routes {
     const val DASHBOARD = "dashboard"
     const val RADAR = "radar"
     const val DEVICES = "devices"
-    const val DEVICE_DETAILS = "device_details/{address}"
+    const val DEVICE_DETAILS = "device_details/{type}/{address}"
     const val HISTORY = "history"
     const val STATISTICS = "statistics"
     const val SETTINGS = "settings"
@@ -106,7 +106,7 @@ fun AppNavigation(
                 RadarScreen(
                     vm = viewModel,
                     onDeviceClick = { device ->
-                        navController.navigate("device_details/${device.address}")
+                        navController.navigate("device_details/BLUETOOTH/${device.address}")
                     }
                 )
             }
@@ -116,7 +116,7 @@ fun AppNavigation(
                     vm = devicesVm,
                     dashboardVm = viewModel,
                     onDeviceClick = { device ->
-                        navController.navigate("device_details/${device.address}")
+                        navController.navigate("device_details/${device.type}/${device.address}")
                     }
                 )
             }
@@ -129,9 +129,11 @@ fun AppNavigation(
                 StatisticsScreen(vm = statsVm)
             }
             composable(Routes.DEVICE_DETAILS) { backStackEntry ->
+                val type = backStackEntry.arguments?.getString("type") ?: ""
                 val address = backStackEntry.arguments?.getString("address") ?: ""
                 val detailsVm: DeviceDetailsViewModel = viewModel()
                 DeviceDetailsScreen(
+                    type = type,
                     address = address,
                     vm = detailsVm,
                     onBack = { navController.popBackStack() }

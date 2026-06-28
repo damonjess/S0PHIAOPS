@@ -24,7 +24,10 @@ class BluetoothScanner(
     private val handler = Handler(Looper.getMainLooper())
 
     @SuppressLint("MissingPermission")
-    fun startDiscovery(onDeviceFound: (BluetoothDevice, Int) -> Unit) {
+    fun startDiscovery(
+        onDeviceFound: (BluetoothDevice, Int) -> Unit,
+        onDiscoveryFinished: () -> Unit = {}
+    ) {
         if (adapter == null) {
             Log.e(tag, "BluetoothAdapter is null")
             return
@@ -94,6 +97,7 @@ class BluetoothScanner(
                         } catch (e: Exception) {
                             // Already unregistered
                         }
+                        onDiscoveryFinished()
                     }
                 }
             }

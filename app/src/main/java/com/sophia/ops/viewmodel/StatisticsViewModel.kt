@@ -19,10 +19,7 @@ import java.util.Locale
 
 class StatisticsViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val db = Room.databaseBuilder(
-        application,
-        SophiaDatabase::class.java, "sophia-db"
-    ).fallbackToDestructiveMigration().build()
+    private val db = SophiaDatabase.getInstance(application)
 
     private val scanDao = db.scanSessionDao()
     private val wifiDao = db.wifiDao()

@@ -3,12 +3,14 @@ package com.sophia.ops.ui.devices
 import android.bluetooth.BluetoothDevice
 import android.text.format.DateUtils
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sophia.ops.data.entities.BluetoothDeviceEntity
+import com.sophia.ops.data.entities.WifiNetwork
 import com.sophia.ops.viewmodel.DeviceDetailsViewModel
 import java.text.SimpleDateFormat
 import java.util.*
@@ -25,20 +28,33 @@ import java.util.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceDetailsScreen(
+    type: String,
     address: String,
     vm: DeviceDetailsViewModel,
     onBack: () -> Unit
 ) {
-    val deviceState = vm.getDevice(address).collectAsState(initial = null)
+    if (type == "BLUETOOTH") {
+        BluetoothDetails(address, vm, onBack)
+    } else {
+        WifiDetails(address, vm, onBack)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BluetoothDetails(address: String, vm: DeviceDetailsViewModel, onBack: () -> Unit) {
+    val deviceState = vm.getBluetoothDevice(address).collectAsState(initial = null)
     val device = deviceState.value
-    
+
     var showRenameDialog by remember { mutableStateOf(false) }
+    var showNotesDialog by remember { mutableStateOf(false) }
     var renameText by remember(device?.nickname) { mutableStateOf(device?.nickname ?: "") }
+    var notesText by remember(device?.notes) { mutableStateOf(device?.notes ?: "") }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Device Details") },
+                title = { Text("Bluetooth Details") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -60,128 +76,97 @@ fun DeviceDetailsScreen(
                     .padding(horizontal = 24.dp, vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Header Separator
-                HorizontalDivider(color = Color.Gray, thickness = 1.dp)
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                // Device Header
-                val displayName = when {
-                    !device.nickname.isNullOrBlank() -> device.nickname
-                    !device.name.isNullOrBlank() && !device.name.startsWith("Discovered Device") -> device.name
-                    else -> "Unknown Bluetooth Device"
-                }
+                val displayName = device.nickname ?: device.name ?: "Unknown Bluetooth Device"
                 Text(
                     text = displayName,
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
-                Text(
-                    text = getDeviceType(device.deviceType),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.Gray
-                )
-                Text(
-                    text = device.address,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
-                )
-                Text(
-                    text = "Seen ${device.timesSeen} times",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
-                )
                 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    val riskColor = getRiskColor(device.riskScore)
-                    Surface(
-                        color = riskColor.copy(alpha = 0.1f),
-                        contentColor = riskColor,
-                        shape = MaterialTheme.shapes.small,
-                        border = BorderStroke(1.dp, riskColor.copy(alpha = 0.5f))
-                    ) {
-                        Text(
-                            text = getRiskLabel(device.riskScore).uppercase(),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold
+                    IconButton(onClick = { vm.toggleFavourite(device.address, device.favourite) }) {
+                        Icon(
+                            imageVector = if (device.favourite) Icons.Default.Star else Icons.Default.StarBorder,
+                            contentDescription = "Toggle Favourite",
+                            tint = if (device.favourite) Color.Yellow else Color.Gray
                         )
                     }
-                    
-                    if (device.favourite) {
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Icon(Icons.Default.Star, contentDescription = null, tint = Color.Yellow, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Favourite", style = MaterialTheme.typography.labelMedium, color = Color.Yellow)
-                    }
+                    Text(
+                        text = if (device.favourite) "Favourite" else "Not Favourite",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (device.favourite) Color.Yellow else Color.Gray
+                    )
                 }
-                
+
                 Spacer(modifier = Modifier.height(16.dp))
-                
-                // Content Separator
-                HorizontalDivider(color = Color.Gray, thickness = 1.dp)
-                
-                Spacer(modifier = Modifier.height(24.dp))
-                
-                // Grid/List of details
-                DetailRow("First Seen", formatFirstSeen(device.firstSeen))
-                DetailRow("Last Seen", formatLastSeen(device.lastSeen))
+                HorizontalDivider(color = Color.Gray.copy(alpha = 0.5f))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                DetailRow("Full MAC", device.address)
+                DetailRow("Manufacturer", getManufacturer(device.address))
+                DetailRow("First Seen", formatTimestamp(device.firstSeen))
+                DetailRow("Last Seen", formatTimestamp(device.lastSeen))
                 DetailRow("Signal", "${device.rssi} dBm")
-                DetailRow("Raw Name", device.name ?: "None")
-                DetailRow("Nickname", device.nickname ?: "None")
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
                 Text(
-                    text = "Notes",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.Gray,
+                    text = "Signal History",
+                    style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.align(Alignment.Start)
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                AssistChip(
-                    onClick = { },
-                    label = { Text(device.notes ?: "None") },
-                    modifier = Modifier.align(Alignment.Start)
-                )
+                if (device.signalHistory.isEmpty()) {
+                    Text("No signal history recorded.", color = Color.Gray, modifier = Modifier.align(Alignment.Start))
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().height(40.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        device.signalHistory.takeLast(15).forEach { point ->
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .background(
+                                        color = getSignalColor(point.rssi).copy(alpha = 0.6f)
+                                    )
+                            )
+                        }
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(24.dp))
                 
-                // Actions Separator
-                HorizontalDivider(color = Color.Gray, thickness = 1.dp)
-                
-                Spacer(modifier = Modifier.height(24.dp))
-                
-                // Action Buttons
-                Row(
+                Text(
+                    text = "Notes",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.align(Alignment.Start)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Card(
+                    onClick = { showNotesDialog = true },
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
+                    colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f))
                 ) {
-                    OutlinedButton(onClick = { showRenameDialog = true }) {
-                        Text("[ Rename ]")
-                    }
-                    OutlinedButton(onClick = { vm.toggleFavourite(device.address, device.favourite) }) {
-                        Text(if (device.favourite) "[ Unfavourite ]" else "[ Favourite ]")
-                    }
-                    OutlinedButton(
-                        onClick = { 
-                            vm.toggleIgnored(device.address, device.ignored)
-                            onBack()
-                        },
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = if (device.ignored) Color.White else Color.Red.copy(alpha = 0.8f)
-                        )
-                    ) {
-                        Text(if (device.ignored) "[ Unignore ]" else "[ Ignore ]")
-                    }
+                    Text(
+                        text = device.notes ?: "Add notes...",
+                        modifier = Modifier.padding(16.dp),
+                        color = if (device.notes != null) Color.White else Color.Gray
+                    )
                 }
+
+                Spacer(modifier = Modifier.height(32.dp))
                 
-                Spacer(modifier = Modifier.height(24.dp))
-                
-                HorizontalDivider(color = Color.Gray, thickness = 1.dp)
+                Button(
+                    onClick = { showRenameDialog = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Rename Device")
+                }
             }
         }
     }
@@ -189,84 +174,134 @@ fun DeviceDetailsScreen(
     if (showRenameDialog && device != null) {
         AlertDialog(
             onDismissRequest = { showRenameDialog = false },
-            title = { Text("Rename Nickname") },
+            title = { Text("Rename Device") },
             text = {
-                TextField(
+                OutlinedTextField(
                     value = renameText,
                     onValueChange = { renameText = it },
-                    singleLine = true,
-                    label = { Text("Nickname") }
+                    label = { Text("Nickname") },
+                    singleLine = true
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
                     vm.updateNickname(device.address, renameText.ifBlank { null })
                     showRenameDialog = false
-                }) {
-                    Text("Save")
-                }
+                }) { Text("Save") }
             },
             dismissButton = {
-                TextButton(onClick = { showRenameDialog = false }) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showNotesDialog && device != null) {
+        AlertDialog(
+            onDismissRequest = { showNotesDialog = false },
+            title = { Text("Edit Notes") },
+            text = {
+                OutlinedTextField(
+                    value = notesText,
+                    onValueChange = { notesText = it },
+                    label = { Text("Notes") },
+                    modifier = Modifier.height(150.dp)
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.updateNotes(device.address, notesText.ifBlank { null })
+                    showNotesDialog = false
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNotesDialog = false }) { Text("Cancel") }
             }
         )
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DetailRow(label: String, value: String, color: Color = Color.White) {
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = Color.Gray
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyLarge,
-            color = color,
-            fontWeight = FontWeight.Medium
-        )
-        Spacer(modifier = Modifier.height(4.dp))
+fun WifiDetails(address: String, vm: DeviceDetailsViewModel, onBack: () -> Unit) {
+    val networkState = vm.getWifiNetwork(address).collectAsState(initial = null)
+    val network = networkState.value
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Wi-Fi Details") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        if (network == null) {
+            Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 16.dp)
+            ) {
+                Text(
+                    text = network.ssid,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = Color.Gray.copy(alpha = 0.5f))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                DetailRow("Full BSSID (MAC)", network.bssid)
+                DetailRow("Manufacturer", getManufacturer(network.bssid))
+                DetailRow("Security", network.security)
+                DetailRow("Last Seen", formatTimestamp(network.timestamp))
+                DetailRow("Signal", "${network.signal} dBm")
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                Text("Wi-Fi details are limited compared to Bluetooth devices.", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }
 
-private fun getDeviceType(type: Int): String {
-    return when (type) {
-        BluetoothDevice.DEVICE_TYPE_LE -> "BLE Device"
-        BluetoothDevice.DEVICE_TYPE_DUAL -> "Dual Mode Device"
-        BluetoothDevice.DEVICE_TYPE_CLASSIC -> "Classic Device"
-        else -> "Unknown Type"
+@Composable
+fun DetailRow(label: String, value: String) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Text(text = label, style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+        Text(text = value, style = MaterialTheme.typography.bodyLarge, color = Color.White, fontWeight = FontWeight.Medium)
     }
 }
 
-private fun formatFirstSeen(timestamp: Long): String {
-    return DateUtils.getRelativeTimeSpanString(
-        timestamp,
-        System.currentTimeMillis(),
-        DateUtils.DAY_IN_MILLIS
+private fun formatTimestamp(timestamp: Long): String {
+    return DateUtils.getRelativeDateTimeString(
+        null, timestamp, DateUtils.MINUTE_IN_MILLIS, DateUtils.WEEK_IN_MILLIS, 0
     ).toString()
 }
 
-private fun formatLastSeen(timestamp: Long): String {
-    val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
-    return sdf.format(Date(timestamp))
-}
-
-private fun getRiskLabel(score: Int): String {
+private fun getManufacturer(mac: String): String {
+    // Basic OUI lookup or placeholder
     return when {
-        score > 50 -> "High"
-        score > 20 -> "Medium"
-        else -> "Low"
+        mac.startsWith("00:1A:11", true) -> "Google"
+        mac.startsWith("00:25:00", true) -> "Apple"
+        mac.startsWith("FC:EC:DA", true) -> "Ubiquiti"
+        else -> "Unknown Manufacturer"
     }
 }
 
-private fun getRiskColor(score: Int): Color {
+private fun getSignalColor(rssi: Int): Color {
     return when {
-        score > 50 -> Color.Red
-        score > 20 -> Color.Yellow
-        else -> Color.Green
+        rssi > -60 -> Color.Green
+        rssi > -80 -> Color.Yellow
+        else -> Color.Red
     }
 }

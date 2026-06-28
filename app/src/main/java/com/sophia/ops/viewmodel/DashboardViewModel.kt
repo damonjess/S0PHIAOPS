@@ -41,10 +41,7 @@ class DashboardViewModel(
 
     private val tag = "DashboardViewModel"
     
-    private val db = Room.databaseBuilder(
-        application,
-        SophiaDatabase::class.java, "sophia-db"
-    ).fallbackToDestructiveMigration().build()
+    private val db = SophiaDatabase.getInstance(application)
     
     private val bluetoothDao = db.bluetoothDao()
     private val scanDao = db.scanSessionDao()
@@ -52,8 +49,12 @@ class DashboardViewModel(
     
     private val scanner = WifiScanner(getApplication())
     private val bluetoothScanner = BluetoothScanner(getApplication())
+    
     var isScanning by mutableStateOf(false)
         private set
+
+    private var isWifiScanning = false
+    private var isBluetoothScanning = false
 
     private var autoRefreshJob: Job? = null
     
@@ -160,6 +161,9 @@ class DashboardViewModel(
 
         lastScanRequestTime = now
         isScanning = true
+        isWifiScanning = true
+        isBluetoothScanning = true
+
         Log.i(tag, "Initiating scan at $now...")
         
         val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
@@ -168,86 +172,92 @@ class DashboardViewModel(
         // Remove immediate clear to avoid UI flickering
         // bluetoothDevices.clear() 
         
-        bluetoothScanner.startDiscovery { device, rssi ->
-            val name = getDisplayName(device)
-            val risk = BluetoothRiskEngine.calculate(name)
-            
-            viewModelScope.launch {
-                try {
-                    val existing = bluetoothDao.getDeviceByAddress(device.address)
-                    val now = System.currentTimeMillis()
-                    
-                    if (existing?.ignored == true) {
-                        // Ensure it's not in the UI list if it was marked as ignored elsewhere
+        bluetoothScanner.startDiscovery(
+            onDeviceFound = { device, rssi ->
+                val name = getDisplayName(device)
+                val risk = BluetoothRiskEngine.calculate(name)
+
+                viewModelScope.launch {
+                    try {
+                        val existing = bluetoothDao.getDeviceByAddress(device.address)
+                        val now = System.currentTimeMillis()
+
+                        if (existing?.ignored == true) {
+                            // Ensure it's not in the UI list if it was marked as ignored elsewhere
+                            val uiIndex = bluetoothDevices.indexOfFirst { it.address == device.address }
+                            if (uiIndex != -1) {
+                                bluetoothDevices.removeAt(uiIndex)
+                            }
+                            return@launch
+                        }
+
+                        val newHistory = (existing?.signalHistory ?: emptyList()) + SignalPoint(rssi, now)
+                        val trimmedHistory = newHistory.takeLast(10)
+
+                        @SuppressLint("MissingPermission")
+                        val entity = if (existing == null) {
+                            val sanitizedName = if (name?.startsWith("Discovered Device") == true) null else name
+                            val newEntity = BluetoothDeviceEntity(
+                                name = sanitizedName,
+                                address = device.address,
+                                deviceType = device.type,
+                                firstSeen = now,
+                                lastSeen = now,
+                                riskScore = risk,
+                                rssi = rssi,
+                                timesSeen = 1,
+                                signalHistory = trimmedHistory
+                            )
+                            bluetoothDao.insert(newEntity)
+                            Log.d("BT", "New device persisted: ${newEntity.address}")
+                            newEntity
+                        } else {
+                            // Update name if we just found a real one, otherwise keep existing
+                            val isNewNameAvailable = !name.isNullOrBlank() && !name.startsWith("Discovered Device")
+                            val finalName = if (isNewNameAvailable) {
+                                name
+                            } else {
+                                if (existing.name?.startsWith("Discovered Device") == true) null else existing.name
+                            }
+
+                            val updatedEntity = existing.copy(
+                                name = finalName,
+                                lastSeen = now,
+                                riskScore = if (isNewNameAvailable) risk else existing.riskScore,
+                                rssi = rssi,
+                                timesSeen = existing.timesSeen + 1,
+                                signalHistory = trimmedHistory
+                            )
+
+                            bluetoothDao.updateDevice(updatedEntity)
+                            Log.d("BT", "Existing device updated: ${updatedEntity.address}")
+                            updatedEntity
+                        }
+
+                        // Sync with UI list
                         val uiIndex = bluetoothDevices.indexOfFirst { it.address == device.address }
                         if (uiIndex != -1) {
-                            bluetoothDevices.removeAt(uiIndex)
-                        }
-                        return@launch
-                    }
-
-                    val newHistory = (existing?.signalHistory ?: emptyList()) + SignalPoint(rssi, now)
-                    val trimmedHistory = newHistory.takeLast(10)
-
-                    @SuppressLint("MissingPermission")
-                    val entity = if (existing == null) {
-                        val sanitizedName = if (name?.startsWith("Discovered Device") == true) null else name
-                        val newEntity = BluetoothDeviceEntity(
-                            name = sanitizedName,
-                            address = device.address,
-                            deviceType = device.type,
-                            firstSeen = now,
-                            lastSeen = now,
-                            riskScore = risk,
-                            rssi = rssi,
-                            timesSeen = 1,
-                            signalHistory = trimmedHistory
-                        )
-                        bluetoothDao.insert(newEntity)
-                        Log.d("BT", "New device persisted: ${newEntity.address}")
-                        newEntity
-                    } else {
-                        // Update name if we just found a real one, otherwise keep existing
-                        val isNewNameAvailable = !name.isNullOrBlank() && !name.startsWith("Discovered Device")
-                        val finalName = if (isNewNameAvailable) {
-                            name
+                            bluetoothDevices[uiIndex] = entity
                         } else {
-                            if (existing.name?.startsWith("Discovered Device") == true) null else existing.name
+                            bluetoothDevices.add(entity)
                         }
-                        
-                        val updatedEntity = existing.copy(
-                            name = finalName,
-                            lastSeen = now,
-                            riskScore = if (isNewNameAvailable) risk else existing.riskScore,
-                            rssi = rssi,
-                            timesSeen = existing.timesSeen + 1,
-                            signalHistory = trimmedHistory
-                        )
-                        
-                        bluetoothDao.updateDevice(updatedEntity)
-                        Log.d("BT", "Existing device updated: ${updatedEntity.address}")
-                        updatedEntity
-                    }
 
-                    // Sync with UI list
-                    val uiIndex = bluetoothDevices.indexOfFirst { it.address == device.address }
-                    if (uiIndex != -1) {
-                        bluetoothDevices[uiIndex] = entity
-                    } else {
-                        bluetoothDevices.add(entity)
+                        if (selectedDevice?.address == entity.address) {
+                            selectedDevice = entity
+                        }
+                    } catch (e: Exception) {
+                        Log.e("BT", "Database sync failed", e)
                     }
-
-                    if (selectedDevice?.address == entity.address) {
-                        selectedDevice = entity
-                    }
-                } catch (e: Exception) {
-                    Log.e("BT", "Database sync failed", e)
                 }
+            },
+            onDiscoveryFinished = {
+                isBluetoothScanning = false
+                isScanning = isWifiScanning || isBluetoothScanning
+                Log.i(tag, "Bluetooth discovery finished.")
             }
-        }
+        )
         
         scanner.startScan { results ->
-            isScanning = false
             // If the scanner returned immediately without a broadcast, it was likely throttled
             // We can infer this by checking if startScan internal logic reported success or if it's returning cached
             // For simplicity in the UI, we'll assume fresh results arrive if they were processed via the scanner's callback
@@ -280,6 +290,9 @@ class DashboardViewModel(
                     saveScanSession()
                 } catch (e: Exception) {
                     Log.e(tag, "Failed to persist WiFi networks", e)
+                } finally {
+                    isWifiScanning = false
+                    isScanning = isWifiScanning || isBluetoothScanning
                 }
             }
         }

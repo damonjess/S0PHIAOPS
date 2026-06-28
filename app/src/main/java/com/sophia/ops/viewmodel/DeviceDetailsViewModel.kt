@@ -4,8 +4,10 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sophia.ops.data.db.SophiaDatabase
-import com.sophia.ops.data.entities.BluetoothDeviceEntity
+import com.sophia.ops.model.DeviceType
+import com.sophia.ops.model.NetworkDevice
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import androidx.room.Room
 
@@ -16,8 +18,10 @@ class DeviceDetailsViewModel(application: Application) : AndroidViewModel(applic
     ).fallbackToDestructiveMigration().build()
 
     private val bluetoothDao = db.bluetoothDao()
+    private val wifiDao = db.wifiDao()
 
-    fun getDevice(address: String): Flow<BluetoothDeviceEntity?> = bluetoothDao.getDeviceByAddressFlow(address)
+    fun getBluetoothDevice(address: String) = bluetoothDao.getDeviceByAddressFlow(address)
+    fun getWifiNetwork(bssid: String) = wifiDao.getNetworkByBssidFlow(bssid)
 
     fun toggleFavourite(address: String, currentState: Boolean) {
         viewModelScope.launch {
@@ -28,18 +32,6 @@ class DeviceDetailsViewModel(application: Application) : AndroidViewModel(applic
     fun updateNickname(address: String, nickname: String?) {
         viewModelScope.launch {
             bluetoothDao.updateNickname(address, nickname)
-        }
-    }
-
-    fun updateName(address: String, name: String) {
-        viewModelScope.launch {
-            bluetoothDao.updateNameByAddress(address, name)
-        }
-    }
-
-    fun toggleIgnored(address: String, currentState: Boolean) {
-        viewModelScope.launch {
-            bluetoothDao.updateIgnored(address, !currentState)
         }
     }
 
