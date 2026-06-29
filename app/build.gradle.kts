@@ -60,6 +60,6 @@ dependencies {
     ksp("androidx.room:room-compiler:2.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
-    // For local, on-device Large Language Model inference
-    implementation("com.google.mediapipe:tasks-genai:0.10.27")
+    // On-device LLM inference for local text generation
+    implementation("com.google.mediapipe:tasks-genai:0.10.14")
 }

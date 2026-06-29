@@ -19,9 +19,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import com.sophia.ops.model.DeviceType
 import com.sophia.ops.model.NetworkDevice
-import com.sophia.ops.data.utils.OuiLookupEngine
+import com.sophia.ops.data.OuiLookup
 import com.sophia.ops.viewmodel.DevicesViewModel
 
 @Composable
@@ -420,8 +421,9 @@ fun DeviceItem(
                     color = Color.LightGray
                 )
 
+                val context = LocalContext.current
                 val cleanVendorName = remember(device.address) {
-                    OuiLookupEngine.resolveVendor(device.address)
+                    OuiLookup.getVendor(context, device.address)
                 }
 
                 Text(

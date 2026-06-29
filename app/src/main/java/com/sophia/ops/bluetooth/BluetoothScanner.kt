@@ -47,11 +47,25 @@ class BluetoothScanner(
         }
 
         // 1. BLE Scan (Maximum Power Mode)
-        val leScanner = adapter.bluetoothLeScanner
+        val leScanner = try {
+            adapter.bluetoothLeScanner
+        } catch (e: SecurityException) {
+            Log.e(tag, "SecurityException accessing bluetoothLeScanner", e)
+            null
+        }
+        
         val leCallback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
-                Log.d("BT", "LE Found: ${result.device.address} [${result.rssi}]")
-                onDeviceFound(result.device, result.rssi)
+                val hasConnectPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                } else {
+                    true
+                }
+
+                if (hasConnectPermission) {
+                    Log.d("BT", "LE Found: ${result.device.address} [${result.rssi}]")
+                    onDeviceFound(result.device, result.rssi)
+                }
             }
         }
 
@@ -64,6 +78,8 @@ class BluetoothScanner(
             try {
                 leScanner.startScan(null, settings, leCallback)
                 Log.i(tag, "LE Scan started in LOW_LATENCY (Max Power) mode")
+            } catch (e: SecurityException) {
+                Log.e(tag, "SecurityException starting LE scan", e)
             } catch (e: Exception) {
                 Log.e(tag, "Failed to start LE scan", e)
             }
@@ -84,9 +100,17 @@ class BluetoothScanner(
                         
                         val rssi: Int = intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, Short.MIN_VALUE).toInt()
 
-                        Log.d("BT", "Found: ${device?.name} [${device?.address}] RSSI: $rssi")
-                        device?.let {
-                            onDeviceFound(it, rssi)
+                        val hasConnectPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            context?.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        } else {
+                            true
+                        }
+
+                        if (hasConnectPermission) {
+                            Log.d("BT", "Found: ${device?.name} [${device?.address}] RSSI: $rssi")
+                            device?.let {
+                                onDeviceFound(it, rssi)
+                            }
                         }
                     }
                     BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
@@ -127,24 +151,35 @@ class BluetoothScanner(
         }
 
         try {
-            if (adapter.isDiscovering) {
+            val isDiscovering = try {
+                adapter.isDiscovering
+            } catch (e: SecurityException) {
+                false
+            }
+
+            if (isDiscovering) {
                 adapter.cancelDiscovery()
             }
 
-            val started = adapter.startDiscovery()
+            val started = try {
+                adapter.startDiscovery()
+            } catch (e: SecurityException) {
+                Log.e(tag, "SecurityException during startDiscovery", e)
+                false
+            }
             Log.d("BT", "Discovery started: $started")
 
             if (!started) {
                 try {
-                    context.unregisterReceiver(receiver)
+                    context?.unregisterReceiver(receiver)
                 } catch (e: Exception) {
                     // Ignore
                 }
             }
-        } catch (e: SecurityException) {
-            Log.e(tag, "SecurityException during discovery start: ${e.message}")
+        } catch (e: Exception) {
+            Log.e(tag, "Error during discovery start", e)
             try {
-                context.unregisterReceiver(receiver)
+                context?.unregisterReceiver(receiver)
             } catch (ex: Exception) { }
         }
     }

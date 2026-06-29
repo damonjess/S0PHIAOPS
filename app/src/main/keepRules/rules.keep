@@ -4,6 +4,14 @@
 # For more details, see
 #   https://d.android.com/r/tools/r8/keep-rules
 
+# Keep MediaPipe Tasks and Core Generation Frameworks
+-keep class com.google.mediapipe.tasks.** { *; }
+-keep class com.google.mediapipe.framework.** { *; }
+-dontwarn com.google.mediapipe.**
+
+# Keep protocol buffers used by the AI Edge models
+-keep class com.google.protobuf.** { *; }
+
 # If your project uses WebView with JS, uncomment the following
 # and specify the fully qualified class name to the JavaScript interface
 # class:

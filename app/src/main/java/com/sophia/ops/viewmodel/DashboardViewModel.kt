@@ -16,13 +16,11 @@ import com.sophia.ops.data.db.SophiaDatabase
 import com.sophia.ops.bluetooth.BluetoothScanner
 import com.sophia.ops.bluetooth.BluetoothRiskEngine
 import com.sophia.ops.ai.CyberDefenseAnalyst
-import com.sophia.ops.ai.SecureActionAgent
 import com.sophia.ops.wifi.RiskEngine
 import com.sophia.ops.wifi.WifiScanner
 import android.util.Log
 import android.annotation.SuppressLint
 import androidx.lifecycle.viewModelScope
-import androidx.room.Room
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -31,6 +29,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -49,8 +50,21 @@ class DashboardViewModel(
     private val scanDao = db.scanSessionDao()
     private val wifiDao = db.wifiDao()
     
-    private val scanner = WifiScanner(getApplication())
-    private val bluetoothScanner = BluetoothScanner(getApplication())
+    private val scanner = WifiScanner(application)
+    private val bluetoothScanner = BluetoothScanner(application)
+    
+    init {
+        // prepareTacticalAI() // Completely deferred to activateOnDeviceAI() to prevent boot-loading
+        pruneData()
+    }
+
+    private fun pruneData() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val twentyFourHoursAgo = System.currentTimeMillis() - 86400000L
+            bluetoothDao.pruneTransientOldSignals(twentyFourHoursAgo)
+            Log.i(tag, "Automated Cleanup: Dropped unverified/low-risk signals older than 24 hours.")
+        }
+    }
     
     var isScanning by mutableStateOf(false)
         private set
@@ -72,36 +86,167 @@ class DashboardViewModel(
     var aiResponse by mutableStateOf<String?>(null)
         private set
 
+    // Completely avoid referring to the class directly at boot
+    private var tacticalAgent: Any? = null 
+
+    val isAiReady: Boolean
+        get() = tacticalAgent != null
+
+    var aiAdviceText by mutableStateOf("AI Engine Standby. Click to initialize.")
+        private set
+
+    var aiInitializationFailed by mutableStateOf(false)
+        private set
+
+    var isAiLoading by mutableStateOf(false)
+        private set
+
     var isAnalyzing by mutableStateOf(false)
         private set
 
     var strategicBrief by mutableStateOf<String?>(null)
         private set
 
-    private var actionAgent: SecureActionAgent? = null
+    /**
+     * Call this ONLY from a button click or user action inside your UI, 
+     * never call it inside init {} or onCreate()!
+     */
+    fun activateOnDeviceAI() {
+        if (tacticalAgent != null) return // Already running safely
+        
+        viewModelScope.launch {
+            isAiLoading = true
+            aiInitializationFailed = false
+            
+            val targetPath = "/data/local/tmp/gemma-2b-it-cpu.bin"
+            
+            val fileExists = withContext(Dispatchers.IO) { File(targetPath).exists() }
+            if (!fileExists) {
+                aiInitializationFailed = true
+                aiAdviceText = "AI weights file missing at: $targetPath"
+                isAiLoading = false
+                return@launch
+            }
+
+            // Force dynamic class verification safely isolated inside an IO block
+            val initResult = withContext(Dispatchers.IO) {
+                try {
+                    val agentClass = Class.forName("com.sophia.ops.ai.SecureActionAgent")
+                    val constructor = agentClass.getConstructor(android.content.Context::class.java, String::class.java)
+                    val instance = constructor.newInstance(getApplication<Application>(), targetPath)
+                    
+                    val initMethod = agentClass.getMethod("initializeEngine")
+                    val result = initMethod.invoke(instance) as Boolean
+                    
+                    if (result) {
+                        tacticalAgent = instance
+                        Result.success(true)
+                    } else {
+                        Result.failure(Exception("Engine reports failure (check logcat/weights)"))
+                    }
+                } catch (t: Throwable) {
+                    t.printStackTrace()
+                    Result.failure(t)
+                }
+            }
+
+            if (initResult.isSuccess) {
+                aiInitializationFailed = false
+                aiAdviceText = "SOPHIA AI Engine Online. Awaiting threat metrics..."
+                withContext(Dispatchers.IO) {
+                    CyberDefenseAnalyst.initialize(getApplication())
+                }
+            } else {
+                aiInitializationFailed = true
+                val error = initResult.exceptionOrNull()?.localizedMessage ?: "Unknown link error"
+                aiAdviceText = "AI Failed: $error"
+            }
+            isAiLoading = false
+        }
+    }
 
     fun analyzeThreat() {
         if (isAnalyzing) return
         viewModelScope.launch {
             isAnalyzing = true
             
-            val deviceCount = networks.size + bluetoothDevices.size
+            val wifiCount = networks.size
+            val bleCount = bluetoothDevices.size
+            val totalCount = wifiCount + bleCount
+
+            val environmentType = when {
+                totalCount > 1500 -> "Ultra-Dense Urban / Electronic Saturation Zone"
+                totalCount > 500  -> "Standard Congestion Zone"
+                else              -> "Low-Noise / Isolated Perimeter"
+            }
+
+            val telemetryPayload = """
+                Density Context: $environmentType
+                Raw Environment Signals: $wifiCount Wi-Fi, $bleCount Bluetooth nodes.
+                Active Countermeasures Status: Adaptive attenuation active. Persistent targets identified.
+            """.trimIndent()
             
             // Standard analysis
-            aiResponse = CyberDefenseAnalyst.analyzeThreat(threatScore, deviceCount)
+            aiResponse = CyberDefenseAnalyst.analyzeThreat(threatScore, totalCount)
+            
+            // Also update the tactical advice via the agent
+            requestTacticalAnalysis(threatScore, telemetryPayload)
             
             // Strategic brief for high-threat scenarios (> 70%)
             if (threatScore > 70) {
-                if (actionAgent == null) {
-                    actionAgent = SecureActionAgent(getApplication(), "/data/local/tmp/gemma-2b.bin")
+                try {
+                    val agent = tacticalAgent
+                    if (agent != null) {
+                        withContext(Dispatchers.Default) {
+                            val agentClass = agent.javaClass
+                            val isReadyMethod = agentClass.getMethod("isReady")
+                            val isReady = isReadyMethod.invoke(agent) as Boolean
+                            
+                            if (isReady) {
+                                val analyzeMethod = agentClass.getMethod("analyzeThreatBrief", Int::class.javaPrimitiveType, String::class.java)
+                                strategicBrief = analyzeMethod.invoke(agent, threatScore, telemetryPayload) as String
+                            } else {
+                                strategicBrief = "Tactical AI is not ready."
+                            }
+                        }
+                    }
+                } catch (t: Throwable) {
+                    t.printStackTrace()
+                    strategicBrief = "Strategic analysis failed due to a native subsystem error."
                 }
-                val telemetry = "Detected abnormal signal density. $deviceCount distinct traces found in proximity."
-                strategicBrief = actionAgent?.analyzeThreatBrief(threatScore, telemetry)
             } else {
                 strategicBrief = null
             }
 
             isAnalyzing = false
+        }
+    }
+
+    fun requestTacticalAnalysis(threatScore: Int, contextSummary: String) {
+        viewModelScope.launch {
+            // If the reflection instance wasn't built yet, skip execution entirely
+            val agentInstance = tacticalAgent ?: return@launch
+
+            try {
+                // Locate the analysis method dynamically matching our isolated architecture
+                val agentClass = agentInstance.javaClass
+                val analyzeMethod = agentClass.getMethod(
+                    "analyzeThreatBrief", 
+                    Int::class.java, 
+                    String::class.java
+                )
+                
+                // Execute the model on a safe background thread container
+                val generatedBrief = withContext(Dispatchers.Default) {
+                    analyzeMethod.invoke(agentInstance, threatScore, contextSummary) as String
+                }
+                
+                // Post the result safely back to your UI state
+                aiAdviceText = generatedBrief
+            } catch (t: Throwable) {
+                t.printStackTrace()
+                aiAdviceText = "Tactical generation suspended due to an inference loop exception."
+            }
         }
     }
 
@@ -155,8 +300,40 @@ class DashboardViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "NONE")
     
+    fun calculateAdaptiveThreatScore(wifiCount: Int, bleCount: Int, highRiskDevices: Int): Int {
+        // Establish a baseline environment density factor
+        val totalSignalDensity = wifiCount + bleCount
+        
+        // Scale down raw counts if in a high-density zone to prevent immediate 100% saturation
+        val densityAttenuationMultiplier = when {
+            totalSignalDensity > 1500 -> 0.15f  // Intense density (like your field test)
+            totalSignalDensity > 500  -> 0.40f  // Standard urban density
+            else                      -> 1.00f  // Quiet/Isolated perimeter
+        }
+
+        // Base score calculations using attenuated environmental metrics
+        val adjustedWifiScore = (wifiCount * 0.2f) * densityAttenuationMultiplier
+        val adjustedBleScore = (bleCount * 0.1f) * densityAttenuationMultiplier
+        
+        // High-risk indicators (e.g., matching known malicious profiles) bypass the density filter
+        val criticalVectorScore = highRiskDevices * 25 
+
+        // Merge parameters and constrain between 0% and 100%
+        val finalCalculatedScore = (adjustedWifiScore + adjustedBleScore + criticalVectorScore).toInt()
+        return finalCalculatedScore.coerceIn(0, 100)
+    }
+
     val threatScore: Int
-        get() = (networks.size + bluetoothDevices.size).coerceIn(0, 100)
+        get() {
+            val highRiskWifi = networks.count { it.riskScore > 60 }
+            val highRiskBle = bluetoothDevices.count { it.riskScore > 60 }
+            
+            return calculateAdaptiveThreatScore(
+                wifiCount = networks.size,
+                bleCount = bluetoothDevices.size,
+                highRiskDevices = highRiskWifi + highRiskBle
+            )
+        }
 
     val threatLevel: String
         get() = when (threatScore) {
@@ -218,7 +395,6 @@ class DashboardViewModel(
         bluetoothScanner.startDiscovery(
             onDeviceFound = { device, rssi ->
                 val name = getDisplayName(device)
-                val risk = BluetoothRiskEngine.calculate(name)
 
                 viewModelScope.launch {
                     try {
@@ -233,6 +409,9 @@ class DashboardViewModel(
                             }
                             return@launch
                         }
+
+                        val timesSeen = (existing?.timesSeen ?: 0) + 1
+                        val risk = BluetoothRiskEngine.calculate(name, rssi, timesSeen)
 
                         val newHistory = (existing?.signalHistory ?: emptyList()) + SignalPoint(rssi, now)
                         val trimmedHistory = newHistory.takeLast(10)
@@ -266,9 +445,9 @@ class DashboardViewModel(
                             val updatedEntity = existing.copy(
                                 name = finalName,
                                 lastSeen = now,
-                                riskScore = if (isNewNameAvailable) risk else existing.riskScore,
+                                riskScore = risk,
                                 rssi = rssi,
-                                timesSeen = existing.timesSeen + 1,
+                                timesSeen = timesSeen,
                                 signalHistory = trimmedHistory
                             )
 
@@ -277,7 +456,10 @@ class DashboardViewModel(
                             updatedEntity
                         }
 
-                        // Sync with UI list
+                        // Sync with UI list: If risk is 0 (transient), we keep it in DB but can choose to exclude from UI 
+                        // to reduce noise, or just let it stay with 0 risk. 
+                        // The user said "categorized as background noise, dropping their threat weight to zero".
+                        // Let's keep them in the list so they are visible on Radar but don't impact the main Score.
                         val uiIndex = bluetoothDevices.indexOfFirst { it.address == device.address }
                         if (uiIndex != -1) {
                             bluetoothDevices[uiIndex] = entity
@@ -310,8 +492,10 @@ class DashboardViewModel(
             isThrottled = false // Reset throttle indicator on new callback
             lastScanWasLive = true
             
-            val updatedList = results.map {
+            val updatedList = results.mapNotNull {
                 val risk = RiskEngine.calculate(it.capabilities, it.level)
+                if (risk == 0) return@mapNotNull null
+
                 WifiNetwork(
                     ssid = it.SSID,
                     bssid = it.BSSID,
@@ -331,9 +515,8 @@ class DashboardViewModel(
                 try {
                     wifiDao.insertAll(updatedList)
                     saveScanSession()
-                    if (threatScore > 50) {
-                        analyzeThreat()
-                    }
+                    // Force AI analysis for the field test
+                    analyzeThreat()
                 } catch (e: Exception) {
                     Log.e(tag, "Failed to persist WiFi networks", e)
                 } finally {
@@ -389,17 +572,27 @@ class DashboardViewModel(
     private fun getDisplayName(device: BluetoothDevice): String? {
         // 1. Check if the device is already paired (bonded) for a high-quality name
         val adapter = BluetoothAdapter.getDefaultAdapter()
-        val bondedMatch = adapter?.bondedDevices?.firstOrNull { it.address == device.address }
-        val bondedName = bondedMatch?.name
-        if (!bondedName.isNullOrBlank()) return bondedName
+        
+        // Safety check for BLUETOOTH_CONNECT permission on Android 12+
+        val hasConnectPermission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            getApplication<Application>().checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
 
-        // 2. Try the name reported during discovery
-        val name = device.name
-        if (!name.isNullOrBlank()) return name
+        if (hasConnectPermission) {
+            val bondedMatch = adapter?.bondedDevices?.firstOrNull { it.address == device.address }
+            val bondedName = bondedMatch?.name
+            if (!bondedName.isNullOrBlank()) return bondedName
 
-        // 3. Try the alias (Android R+)
-        val alias = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) device.alias else null
-        if (!alias.isNullOrBlank()) return alias
+            // 2. Try the name reported during discovery
+            val name = device.name
+            if (!name.isNullOrBlank()) return name
+
+            // 3. Try the alias (Android R+)
+            val alias = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) device.alias else null
+            if (!alias.isNullOrBlank()) return alias
+        }
 
         // 4. No name found
         return null

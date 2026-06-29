@@ -20,7 +20,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.sophia.ops.data.utils.OuiLookupEngine
+import com.sophia.ops.data.OuiLookup
 import com.sophia.ops.data.entities.BluetoothDeviceEntity
 import com.sophia.ops.data.entities.WifiNetwork
 import com.sophia.ops.viewmodel.DeviceDetailsViewModel
@@ -108,7 +108,7 @@ fun BluetoothDetails(address: String, vm: DeviceDetailsViewModel, onBack: () -> 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 DetailRow("Full MAC", device.address)
-                DetailRow("Manufacturer", OuiLookupEngine.resolveVendor(device.address))
+                DetailRow("Manufacturer", OuiLookup.getVendor(LocalContext.current, device.address))
                 DetailRow("First Seen", formatTimestamp(device.firstSeen))
                 DetailRow("Last Seen", formatTimestamp(device.lastSeen))
                 DetailRow("Signal", "${device.rssi} dBm")
@@ -264,7 +264,7 @@ fun WifiDetails(address: String, vm: DeviceDetailsViewModel, onBack: () -> Unit)
                 Spacer(modifier = Modifier.height(16.dp))
 
                 DetailRow("Full BSSID (MAC)", network.bssid)
-                DetailRow("Manufacturer", OuiLookupEngine.resolveVendor(network.bssid))
+                DetailRow("Manufacturer", OuiLookup.getVendor(LocalContext.current, network.bssid))
                 DetailRow("Security", network.security)
                 DetailRow("Last Seen", formatTimestamp(network.timestamp))
                 DetailRow("Signal", "${network.signal} dBm")

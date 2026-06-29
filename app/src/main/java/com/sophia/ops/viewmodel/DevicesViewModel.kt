@@ -4,7 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sophia.ops.data.db.SophiaDatabase
-import com.sophia.ops.data.utils.OuiLookupEngine
+import com.sophia.ops.data.OuiLookup
 import com.sophia.ops.model.DeviceType
 import com.sophia.ops.model.NetworkDevice
 import kotlinx.coroutines.flow.SharingStarted
@@ -28,7 +28,7 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
                 id = entity.address,
                 name = entity.nickname ?: entity.name ?: "Unknown Bluetooth Device",
                 address = entity.address,
-                vendor = OuiLookupEngine.resolveVendor(entity.address),
+                vendor = OuiLookup.getVendor(getApplication(), entity.address),
                 type = DeviceType.BLUETOOTH,
                 signal = entity.rssi,
                 favourite = entity.favourite,
@@ -41,7 +41,7 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
                 id = network.bssid,
                 name = network.ssid,
                 address = network.bssid,
-                vendor = OuiLookupEngine.resolveVendor(network.bssid),
+                vendor = OuiLookup.getVendor(getApplication(), network.bssid),
                 type = DeviceType.WIFI,
                 signal = network.signal,
                 favourite = false,

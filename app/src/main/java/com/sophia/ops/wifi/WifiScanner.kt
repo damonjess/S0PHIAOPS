@@ -35,7 +35,12 @@ class WifiScanner(
                     Log.e(tag, "Error unregistering receiver", e)
                 }
                 
-                val results = wifiManager.scanResults
+                val results = try {
+                    wifiManager.scanResults
+                } catch (e: SecurityException) {
+                    Log.e(tag, "SecurityException accessing scanResults", e)
+                    emptyList()
+                }
                 Log.i(tag, "Scan results received via broadcast: ${results.size} items")
                 onResults(results)
             }
@@ -52,12 +57,22 @@ class WifiScanner(
             )
         } catch (e: Exception) {
             Log.e(tag, "Failed to register receiver", e)
-            onResults(wifiManager.scanResults)
+            val currentResults = try {
+                wifiManager.scanResults
+            } catch (se: SecurityException) {
+                emptyList()
+            }
+            onResults(currentResults)
             return
         }
 
         @Suppress("DEPRECATION")
-        val success = wifiManager.startScan()
+        val success = try {
+            wifiManager.startScan()
+        } catch (e: SecurityException) {
+            Log.e(tag, "SecurityException calling startScan", e)
+            false
+        }
         Log.i(tag, "wifiManager.startScan() called at ${System.currentTimeMillis()}. Success: $success")
 
         if (!success) {
@@ -67,7 +82,11 @@ class WifiScanner(
             } catch (e: Exception) {
                 // Ignore
             }
-            val currentResults = wifiManager.scanResults
+            val currentResults = try {
+                wifiManager.scanResults
+            } catch (e: SecurityException) {
+                emptyList()
+            }
             Log.d(tag, "Scan throttled. Returning current results: ${currentResults.size}")
             onResults(currentResults)
         }

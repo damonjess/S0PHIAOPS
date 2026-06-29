@@ -49,4 +49,11 @@ interface BluetoothDao {
 
     @Query("SELECT COUNT(*) FROM bluetooth_devices")
     fun getCount(): Flow<Int>
+
+    /**
+     * Drops unverified, low-risk peripheral traces that are older than 24 hours.
+     * thresholdTime should be (System.currentTimeMillis() - 86400000)
+     */
+    @Query("DELETE FROM bluetooth_devices WHERE lastSeen < :thresholdTime AND ignored = 0")
+    suspend fun pruneTransientOldSignals(thresholdTime: Long)
 }

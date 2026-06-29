@@ -10,9 +10,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.sophia.ops.services.ScanForegroundService
+import com.sophia.ops.viewmodel.DashboardViewModel
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(vm: DashboardViewModel) {
     val context = LocalContext.current
     var isBackgroundScanEnabled by remember {
         mutableStateOf(isServiceRunning(context, ScanForegroundService::class.java))
@@ -56,6 +57,44 @@ fun SettingsScreen() {
                             ScanForegroundService.stopService(context)
                         }
                     }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text("AI Subsystem", style = MaterialTheme.typography.titleLarge)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (vm.isAiLoading) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text("Initializing cognitive core...", style = MaterialTheme.typography.labelSmall)
+            } else if (!vm.isAiReady) {
+                Button(
+                    onClick = { vm.activateOnDeviceAI() },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color(0xFF00BCD4))
+                ) {
+                    Text("INITIALIZE COGNITIVE AI CORE")
+                }
+                if (vm.aiInitializationFailed) {
+                    Text(
+                        text = "Last initialization failed. Check model weights in /data/local/tmp/",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            } else {
+                Text(
+                    "Cognitive AI Core is active and monitoring.",
+                    color = androidx.compose.ui.graphics.Color.Green,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    "Status: ${vm.aiAdviceText}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

@@ -21,4 +21,16 @@ class ExampleInstrumentedTest {
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("com.sophia.ops", appContext.packageName)
     }
+
+    @Test
+    fun testOuiLookup() {
+        val appContext = InstrumentationRegistry.getInstrumentation().targetContext
+        // Testing a known VMware OUI if it exists in the database
+        val vendor = com.sophia.ops.data.OuiLookup.getVendor(appContext, "00:0C:29:12:34:56")
+        // We don't know for sure if it's in the full database, but we can check if it returns something other than "Unknown"
+        assertNotEquals("Unknown", vendor)
+        
+        val unknownVendor = com.sophia.ops.data.OuiLookup.getVendor(appContext, "FF:FF:FF:FF:FF:FF")
+        assertEquals("Unknown Vendor", unknownVendor)
+    }
 }

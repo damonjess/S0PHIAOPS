@@ -1,6 +1,7 @@
 package com.sophia.ops.ai
 
 import android.content.Context
+import android.util.Log
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -8,7 +9,7 @@ import java.io.File
 
 object CyberDefenseAnalyst {
     private var llmInference: LlmInference? = null
-    private const val MODEL_PATH = "/data/local/tmp/gemma-2b.bin"
+    private const val MODEL_PATH = "/data/local/tmp/gemma-2b-it-cpu.bin"
 
     /**
      * Initializes the local LLM. This should be called on a background thread.
@@ -18,16 +19,21 @@ object CyberDefenseAnalyst {
         
         val modelFile = File(MODEL_PATH)
         if (!modelFile.exists()) {
-            println("AI Analyst Error: Model file not found at $MODEL_PATH")
+            Log.e("CyberDefenseAnalyst", "AI Analyst Error: Model file not found at $MODEL_PATH")
             return
         }
 
-        val options = LlmInference.LlmInferenceOptions.builder()
-            .setModelPath(MODEL_PATH)
-            .setMaxTokens(512)
-            .build()
+        try {
+            val options = LlmInference.LlmInferenceOptions.builder()
+                .setModelPath(MODEL_PATH)
+                .setMaxTokens(512)
+                .build()
 
-        llmInference = LlmInference.createFromOptions(context, options)
+            llmInference = LlmInference.createFromOptions(context, options)
+            Log.i("CyberDefenseAnalyst", "AI Analyst initialized successfully")
+        } catch (e: Throwable) {
+            Log.e("CyberDefenseAnalyst", "Failed to initialize AI Analyst: ${e.message}", e)
+        }
     }
 
     /**

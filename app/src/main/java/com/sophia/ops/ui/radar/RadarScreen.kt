@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -47,11 +48,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.sophia.ops.data.entities.BluetoothDeviceEntity
-import com.sophia.ops.data.utils.OuiLookupEngine
+import com.sophia.ops.data.OuiLookup
 import com.sophia.ops.viewmodel.DashboardViewModel
 import kotlin.math.cos
 import kotlin.math.sin
@@ -441,6 +443,48 @@ fun RadarScreen(
                     }
                 )
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // SOPHIA Secure Action Agent Status Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (vm.aiInitializationFailed) Color(0xFF3A1C1C) else Color(0xFF1E1E1E)
+                )
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    if (vm.isAiLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.Green)
+                    } else if (!vm.isAiReady) {
+                        Text(
+                            text = if (vm.aiInitializationFailed) "⚠️ AI INITIALIZATION FAILED" else "🤖 AI ENGINE STANDBY",
+                            color = if (vm.aiInitializationFailed) Color.Red else Color(0xFF00BCD4),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = { vm.activateOnDeviceAI() },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BCD4))
+                        ) {
+                            Text("INITIALIZE COGNITIVE AI CORE")
+                        }
+                    } else {
+                        Text(
+                            text = "🤖 SOPHIA SECURE ACTION AGENT",
+                            color = Color.Green,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = vm.aiAdviceText,
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            }
         }
 
         // Device Timeline Section
@@ -477,8 +521,9 @@ fun RadarScreen(
                         color = Color.Gray
                     )
                     
+                    val context = LocalContext.current
                     val vendorName = remember(device.address) {
-                        OuiLookupEngine.resolveVendor(device.address)
+                        OuiLookup.getVendor(context, device.address)
                     }
                     Text(
                         text = "Vendor: $vendorName",

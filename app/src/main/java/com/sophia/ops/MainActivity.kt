@@ -12,7 +12,6 @@ import androidx.lifecycle.lifecycleScope
 import com.sophia.ops.ai.CyberDefenseAnalyst
 import androidx.compose.material3.Surface
 import com.sophia.ops.navigation.AppNavigation
-import com.sophia.ops.data.utils.OuiLookupEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import com.sophia.ops.ui.theme.SophiaOpsTheme
@@ -46,13 +45,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Warm up the OUI database cache
-        OuiLookupEngine.initialize(applicationContext)
-
         // Initialize local AI Analyst
+        /*
         lifecycleScope.launch(Dispatchers.IO) {
-            CyberDefenseAnalyst.initialize(applicationContext)
+            try {
+                CyberDefenseAnalyst.initialize(applicationContext)
+            } catch (e: Throwable) {
+                Log.e("MainActivity", "AI Initialization failed", e)
+            }
         }
+        */
 
         val permissionList = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,

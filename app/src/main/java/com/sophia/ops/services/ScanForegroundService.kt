@@ -111,8 +111,9 @@ class ScanForegroundService : Service() {
                     } catch (e: Exception) {
                         null
                     }
-                    val risk = BluetoothRiskEngine.calculate(name)
                     val existing = db.bluetoothDao().getDeviceByAddress(device.address)
+                    val timesSeen = (existing?.timesSeen ?: 0) + 1
+                    val risk = BluetoothRiskEngine.calculate(name, rssi, timesSeen)
                     val now = System.currentTimeMillis()
 
                     if (existing?.ignored == true) return@launch
@@ -136,8 +137,9 @@ class ScanForegroundService : Service() {
                     } else {
                         val updatedEntity = existing.copy(
                             lastSeen = now,
+                            riskScore = risk,
                             rssi = rssi,
-                            timesSeen = existing.timesSeen + 1,
+                            timesSeen = timesSeen,
                             signalHistory = trimmedHistory
                         )
                         db.bluetoothDao().updateDevice(updatedEntity)
