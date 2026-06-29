@@ -244,7 +244,7 @@ class DashboardViewModel(
     }
 
     private fun BluetoothDeviceEntity.toNetworkDevice(app: Application): NetworkDevice {
-        val baseAngle = (this.address.hashCode().toFloat() % 360)
+        val baseAngle = (this.address.hashCode().toFloat() % 360f)
         return NetworkDevice(
             id = this.address,
             name = this.nickname ?: this.name ?: "Unknown Bluetooth Device",
@@ -263,7 +263,7 @@ class DashboardViewModel(
     }
 
     private fun WifiNetwork.toNetworkDevice(app: Application): NetworkDevice {
-        val baseAngle = (this.bssid.hashCode().toFloat() % 360)
+        val baseAngle = (this.bssid.hashCode().toFloat() % 360f)
         return NetworkDevice(
             id = this.bssid,
             name = this.ssid,
@@ -284,8 +284,10 @@ class DashboardViewModel(
     val allRadarDevices: List<NetworkDevice>
         get() {
             val app = getApplication<Application>()
-            return networks.map { it.toNetworkDevice(app) } + 
-                   bluetoothDevices.map { it.toNetworkDevice(app) }
+            val wifiSnapshot = networks.toList()
+            val bleSnapshot = bluetoothDevices.toList()
+            return wifiSnapshot.map { it.toNetworkDevice(app) } + 
+                   bleSnapshot.map { it.toNetworkDevice(app) }
         }
     
     val historyCount: StateFlow<Int> = scanDao.getCount()
@@ -359,12 +361,14 @@ class DashboardViewModel(
 
     val threatScore: Int
         get() {
-            val highRiskWifi = networks.count { it.riskScore > 60 }
-            val highRiskBle = bluetoothDevices.count { it.riskScore > 60 }
+            val wifiSnapshot = networks.toList()
+            val bleSnapshot = bluetoothDevices.toList()
+            val highRiskWifi = wifiSnapshot.count { it.riskScore > 60 }
+            val highRiskBle = bleSnapshot.count { it.riskScore > 60 }
             
             return calculateAdaptiveThreatScore(
-                wifiCount = networks.size,
-                bleCount = bluetoothDevices.size,
+                wifiCount = wifiSnapshot.size,
+                bleCount = bleSnapshot.size,
                 highRiskDevices = highRiskWifi + highRiskBle
             )
         }
