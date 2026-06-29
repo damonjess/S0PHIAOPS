@@ -29,9 +29,14 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -53,6 +58,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.sophia.ops.data.entities.BluetoothDeviceEntity
+import com.sophia.ops.model.NetworkDevice
 import com.sophia.ops.data.OuiLookup
 import com.sophia.ops.viewmodel.DashboardViewModel
 import kotlin.math.cos
@@ -61,7 +67,7 @@ import kotlin.math.sin
 @Composable
 fun RadarScreen(
     vm: DashboardViewModel,
-    onDeviceClick: (BluetoothDeviceEntity) -> Unit = {}
+    onDeviceClick: (NetworkDevice) -> Unit = {}
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "RadarSweep")
     val sweepAngle by infiniteTransition.animateFloat(
@@ -104,7 +110,7 @@ fun RadarScreen(
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -161,7 +167,7 @@ fun RadarScreen(
             modifier = Modifier
                 .padding(vertical = 4.dp)
                 .fillMaxWidth(),
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End
+            horizontalArrangement = Arrangement.End
         ) {
             LegendItem("Wi-Fi", Color.Green)
             Spacer(modifier = Modifier.width(8.dp))
@@ -171,32 +177,38 @@ fun RadarScreen(
         }
 
         val density = LocalDensity.current
+        val devicesList = vm.allRadarDevices
+        
         Spacer(
             modifier = Modifier
                 .height(400.dp) // Fixed height for radar when scrolling
                 .fillMaxWidth()
-                .pointerInput(vm.networks, vm.bluetoothDevices) {
-                    detectTapGestures { offset ->
-                        val centerX = size.width / 2f
-                        val centerY = size.height / 2f
+                .pointerInput(devicesList) {
+                    detectTapGestures { tapOffset ->
+                        val center = size.width / 2f
                         val minDim = minOf(size.width, size.height).toFloat()
-                        val threshold = with(density) { 24.dp.toPx() }
-
-                        // Check Bluetooth devices for taps
-                        vm.bluetoothDevices.forEach { device ->
-                            val normalized = ((device.rssi + 100).coerceIn(0, 100)).toFloat() / 100f
+                        val maxRadius = minDim / 2f
+                        
+                        // Find if the tap is close to any device's calculated position
+                        val clickedDevice = devicesList.find { device ->
+                            // 1. Re-calculate the dot's X and Y based on your radar logic
+                            val normalized = ((device.signal + 100).coerceIn(0, 100)).toFloat() / 100f
                             val radius = (minDim / 2.2f) * (1f - normalized)
-                            val angle = (device.address.hashCode().toFloat() % 360) * (Math.PI / 180).toFloat()
-                            val x = centerX + radius * cos(angle)
-                            val y = centerY + radius * sin(angle)
-
-                            val dx = offset.x - x
-                            val dy = offset.y - y
-                            if (dx * dx + dy * dy < threshold * threshold) {
-                                vm.selectDevice(device)
-                                return@detectTapGestures
-                            }
+                            val angleRad = Math.toRadians(device.radarAngle.toDouble())
+                            
+                            val dotX = center + (radius * Math.cos(angleRad)).toFloat()
+                            val dotY = center + (radius * Math.sin(angleRad)).toFloat()
+                            
+                            // 2. Calculate distance between tap and dot
+                            val distance = Math.hypot((tapOffset.x - dotX).toDouble(), (tapOffset.y - dotY).toDouble())
+                            
+                            // 3. Define a touch target tolerance (e.g., 24dp in pixels)
+                            val touchTolerance = with(density) { 24.dp.toPx() }
+                            distance <= touchTolerance
                         }
+                        
+                        // Update the viewmodel with the clicked device (or null if they tapped empty space)
+                        vm.selectDevice(clickedDevice)
                     }
                 }
                 .drawBehind {
@@ -240,10 +252,10 @@ fun RadarScreen(
                         strokeWidth = 4f
                     )
 
-                    // Draw network points
-                    vm.networks.forEach { network ->
+                    // Draw all devices (Wi-Fi and Bluetooth)
+                    devicesList.forEach { device ->
                         val normalized =
-                            ((network.signal + 100)
+                            ((device.signal + 100)
                                 .coerceIn(0, 100))
                                 .toFloat() / 100f
 
@@ -251,55 +263,34 @@ fun RadarScreen(
                             (size.minDimension / 2.2f) *
                             (1f - normalized)
 
-                        val baseAngle = (network.bssid.hashCode().toFloat() % 360)
-                        val angle = (baseAngle + network.angularOffset) * (Math.PI / 180).toFloat()
+                        val angle = Math.toRadians(device.radarAngle.toDouble())
 
-                        val x = center.x + radius * cos(angle)
-                        val y = center.y + radius * sin(angle)
+                        val x = center.x + radius * cos(angle).toFloat()
+                        val y = center.y + radius * sin(angle).toFloat()
 
-                        // Color based on risk score (0 = Green, 100 = Red)
-                        val color = Color(
-                            red = (network.riskScore / 100f).coerceIn(0f, 1f),
-                            green = (1f - (network.riskScore / 100f)).coerceIn(0f, 1f),
-                            blue = 0f
-                        )
-
-                        drawCircle(
-                            color = color,
-                            radius = 8.dp.toPx(),
-                            center = Offset(x, y)
-                        )
-                    }
-
-                    // Draw Bluetooth devices
-                    vm.bluetoothDevices.forEach { device ->
-                        val normalized =
-                            ((device.rssi + 100)
-                                .coerceIn(0, 100))
-                                .toFloat() / 100f
-
-                        val radius =
-                            (size.minDimension / 2.2f) *
-                            (1f - normalized)
-                            
-                        val angle = (device.address.hashCode().toFloat() % 360) * (Math.PI / 180).toFloat()
-
-                        val x = center.x + radius * cos(angle)
-                        val y = center.y + radius * sin(angle)
-
-                        val color = if (device.favourite) {
-                            Color.Yellow
-                        } else {
+                        val color = if (device.type == com.sophia.ops.model.DeviceType.WIFI) {
+                            // Wi-Fi Color based on risk score (0 = Green, 100 = Red)
                             Color(
                                 red = (device.riskScore / 100f).coerceIn(0f, 1f),
-                                green = 0f,
-                                blue = (1f - (device.riskScore / 100f)).coerceIn(0.5f, 1f)
+                                green = (1f - (device.riskScore / 100f)).coerceIn(0f, 1f),
+                                blue = 0f
                             )
+                        } else {
+                            // Bluetooth Color
+                            if (device.favourite) {
+                                Color.Yellow
+                            } else {
+                                Color(
+                                    red = (device.riskScore / 100f).coerceIn(0f, 1f),
+                                    green = 0f,
+                                    blue = (1f - (device.riskScore / 100f)).coerceIn(0.5f, 1f)
+                                )
+                            }
                         }
 
                         drawCircle(
                             color = color,
-                            radius = if (device.favourite) 8.dp.toPx() else 6.dp.toPx(),
+                            radius = if (device.favourite || device.type == com.sophia.ops.model.DeviceType.WIFI) 8.dp.toPx() else 6.dp.toPx(),
                             center = Offset(x, y)
                         )
                     }
@@ -335,14 +326,14 @@ fun RadarScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp),
-                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(
                             modifier = Modifier
                                 .weight(1f)
                                 .clickable {
-                                    vm.selectDevice(device)
+                                    vm.selectBluetoothDevice(device)
                                     // Cycle notes logic shifted to a double tap or long press? 
                                     // For now, let's just make click select, and maybe a specific button for notes?
                                     // Or just cycle on click and select.
@@ -422,7 +413,7 @@ fun RadarScreen(
             
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 StatItem("Scans Today", scansToday)
                 StatItem("Wi-Fi Found", wifiFoundToday)
@@ -432,7 +423,7 @@ fun RadarScreen(
             
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 StatItem("Bluetooth Found", bluetoothFoundToday)
                 StatItem("Highest Threat", highestThreatToday, 
@@ -487,14 +478,15 @@ fun RadarScreen(
             }
         }
 
-        // Device Timeline Section
-        vm.selectedDevice?.let { device ->
+        // Device Timeline / Detail Card Section
+        vm.selectedRadarDevice?.let { device ->
             Spacer(modifier = Modifier.height(16.dp))
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 shape = RoundedCornerShape(24.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = Color.White.copy(alpha = 0.05f)
                 )
@@ -504,23 +496,38 @@ fun RadarScreen(
                         .padding(16.dp)
                         .fillMaxWidth()
                 ) {
-                    val displayName = when {
-                        !device.nickname.isNullOrBlank() -> device.nickname
-                        !device.name.isNullOrBlank() && !device.name.startsWith("Discovered Device") -> device.name
-                        else -> "Unknown Bluetooth Device"
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Target: ${device.name}",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color.Green,
+                            modifier = Modifier.clickable { onDeviceClick(device) }
+                        )
+                        IconButton(onClick = { vm.selectDevice(null) }) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = Color.White
+                            )
+                        }
                     }
+                    
                     Text(
-                        text = "Device Timeline: $displayName",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = Color.Green,
-                        modifier = Modifier.clickable { onDeviceClick(device) }
-                    )
-                    Text(
-                        text = device.address,
+                        text = "Address: ${device.address}",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.Gray
                     )
                     
+                    Text(
+                        text = "IP Address: ${device.ipAddress}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.7f)
+                    )
+
                     val context = LocalContext.current
                     val vendorName = remember(device.address) {
                         OuiLookup.getVendor(context, device.address)
@@ -531,21 +538,22 @@ fun RadarScreen(
                         color = Color(0xFF00BCD4)
                     )
                     
-                    val (riskText, riskColor) = when {
-                        device.riskScore > 50 -> "🔴 High Risk" to Color.Red
-                        device.riskScore > 20 -> "🟠 Medium Risk" to Color.Yellow
-                        else -> "🟢 Low Risk" to Color.Green
-                    }
                     Text(
-                        text = riskText,
+                        text = "Threat Level: ${device.threatScore.toInt()}%",
                         style = MaterialTheme.typography.labelSmall,
-                        color = riskColor
+                        color = if (device.threatScore > 50) Color.Red else Color.Yellow
+                    )
+                    
+                    Text(
+                        text = "Status: ${device.status}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.7f)
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         TimelineItem(
                             "First Seen", 
@@ -569,7 +577,7 @@ fun RadarScreen(
             Spacer(modifier = Modifier.height(24.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(

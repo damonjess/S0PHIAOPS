@@ -12,12 +12,15 @@ import com.sophia.ops.data.entities.WifiNetwork
 import com.sophia.ops.data.entities.BluetoothDeviceEntity
 import com.sophia.ops.data.entities.ScanSession
 import com.sophia.ops.data.entities.SignalPoint
+import com.sophia.ops.data.OuiLookup
 import com.sophia.ops.data.db.SophiaDatabase
 import com.sophia.ops.bluetooth.BluetoothScanner
 import com.sophia.ops.bluetooth.BluetoothRiskEngine
 import com.sophia.ops.ai.CyberDefenseAnalyst
 import com.sophia.ops.wifi.RiskEngine
 import com.sophia.ops.wifi.WifiScanner
+import com.sophia.ops.model.NetworkDevice
+import com.sophia.ops.model.DeviceType
 import android.util.Log
 import android.annotation.SuppressLint
 import androidx.lifecycle.viewModelScope
@@ -80,6 +83,10 @@ class DashboardViewModel(
     val networks = mutableStateListOf<WifiNetwork>()
     val bluetoothDevices = mutableStateListOf<BluetoothDeviceEntity>()
     
+    // Tracks the currently selected device from the radar
+    var selectedRadarDevice by mutableStateOf<NetworkDevice?>(null)
+        private set
+
     var selectedDevice by mutableStateOf<BluetoothDeviceEntity?>(null)
         private set
 
@@ -153,9 +160,6 @@ class DashboardViewModel(
             if (initResult.isSuccess) {
                 aiInitializationFailed = false
                 aiAdviceText = "SOPHIA AI Engine Online. Awaiting threat metrics..."
-                withContext(Dispatchers.IO) {
-                    CyberDefenseAnalyst.initialize(getApplication())
-                }
             } else {
                 aiInitializationFailed = true
                 val error = initResult.exceptionOrNull()?.localizedMessage ?: "Unknown link error"
@@ -173,6 +177,7 @@ class DashboardViewModel(
             val wifiCount = networks.size
             val bleCount = bluetoothDevices.size
             val totalCount = wifiCount + bleCount
+            val currentThreatScore = threatScore
 
             val environmentType = when {
                 totalCount > 1500 -> "Ultra-Dense Urban / Electronic Saturation Zone"
@@ -186,35 +191,38 @@ class DashboardViewModel(
                 Active Countermeasures Status: Adaptive attenuation active. Persistent targets identified.
             """.trimIndent()
             
-            // Standard analysis
-            aiResponse = CyberDefenseAnalyst.analyzeThreat(threatScore, totalCount)
-            
-            // Also update the tactical advice via the agent
-            requestTacticalAnalysis(threatScore, telemetryPayload)
-            
-            // Strategic brief for high-threat scenarios (> 70%)
-            if (threatScore > 70) {
+            val agentInstance = tacticalAgent
+            if (agentInstance != null) {
                 try {
-                    val agent = tacticalAgent
-                    if (agent != null) {
-                        withContext(Dispatchers.Default) {
-                            val agentClass = agent.javaClass
-                            val isReadyMethod = agentClass.getMethod("isReady")
-                            val isReady = isReadyMethod.invoke(agent) as Boolean
-                            
-                            if (isReady) {
-                                val analyzeMethod = agentClass.getMethod("analyzeThreatBrief", Int::class.javaPrimitiveType, String::class.java)
-                                strategicBrief = analyzeMethod.invoke(agent, threatScore, telemetryPayload) as String
-                            } else {
-                                strategicBrief = "Tactical AI is not ready."
-                            }
-                        }
+                    val agentClass = agentInstance.javaClass
+                    
+                    // FIX: Use javaPrimitiveType for 'int' parameter to match Kotlin's 'Int'
+                    val analyzeMethod = agentClass.getMethod(
+                        "generateActionAdvice", 
+                        Int::class.javaPrimitiveType, 
+                        String::class.java
+                    )
+                    
+                    val generatedBrief = withContext(Dispatchers.Default) {
+                        analyzeMethod.invoke(agentInstance, currentThreatScore, telemetryPayload) as String
+                    }
+                    
+                    aiAdviceText = generatedBrief
+                    aiResponse = generatedBrief
+                    
+                    // Strategic brief for high-threat scenarios (> 70%)
+                    if (currentThreatScore > 70) {
+                        strategicBrief = generatedBrief
+                    } else {
+                        strategicBrief = null
                     }
                 } catch (t: Throwable) {
                     t.printStackTrace()
+                    aiAdviceText = "Tactical generation suspended: Subsystem mismatch."
                     strategicBrief = "Strategic analysis failed due to a native subsystem error."
                 }
             } else {
+                aiAdviceText = "AI Engine Standby. Click to initialize."
                 strategicBrief = null
             }
 
@@ -222,37 +230,63 @@ class DashboardViewModel(
         }
     }
 
-    fun requestTacticalAnalysis(threatScore: Int, contextSummary: String) {
-        viewModelScope.launch {
-            // If the reflection instance wasn't built yet, skip execution entirely
-            val agentInstance = tacticalAgent ?: return@launch
+    fun selectDevice(device: NetworkDevice?) {
+        selectedRadarDevice = device
+    }
 
-            try {
-                // Locate the analysis method dynamically matching our isolated architecture
-                val agentClass = agentInstance.javaClass
-                val analyzeMethod = agentClass.getMethod(
-                    "analyzeThreatBrief", 
-                    Int::class.java, 
-                    String::class.java
-                )
-                
-                // Execute the model on a safe background thread container
-                val generatedBrief = withContext(Dispatchers.Default) {
-                    analyzeMethod.invoke(agentInstance, threatScore, contextSummary) as String
-                }
-                
-                // Post the result safely back to your UI state
-                aiAdviceText = generatedBrief
-            } catch (t: Throwable) {
-                t.printStackTrace()
-                aiAdviceText = "Tactical generation suspended due to an inference loop exception."
-            }
+    fun selectBluetoothDevice(entity: BluetoothDeviceEntity?) {
+        selectedDevice = entity
+        selectedRadarDevice = entity?.toNetworkDevice(getApplication())
+    }
+
+    fun selectWifiNetwork(network: WifiNetwork?) {
+        selectedRadarDevice = network?.toNetworkDevice(getApplication())
+    }
+
+    private fun BluetoothDeviceEntity.toNetworkDevice(app: Application): NetworkDevice {
+        val baseAngle = (this.address.hashCode().toFloat() % 360)
+        return NetworkDevice(
+            id = this.address,
+            name = this.nickname ?: this.name ?: "Unknown Bluetooth Device",
+            address = this.address,
+            vendor = OuiLookup.getVendor(app, this.address),
+            type = DeviceType.BLUETOOTH,
+            signal = this.rssi,
+            favourite = this.favourite,
+            lastSeen = this.lastSeen,
+            firstSeen = this.firstSeen,
+            riskScore = this.riskScore,
+            timesSeen = this.timesSeen,
+            threatScore = this.riskScore.toFloat(),
+            radarAngle = baseAngle
+        )
+    }
+
+    private fun WifiNetwork.toNetworkDevice(app: Application): NetworkDevice {
+        val baseAngle = (this.bssid.hashCode().toFloat() % 360)
+        return NetworkDevice(
+            id = this.bssid,
+            name = this.ssid,
+            address = this.bssid,
+            vendor = OuiLookup.getVendor(app, this.bssid),
+            type = DeviceType.WIFI,
+            signal = this.signal,
+            favourite = false,
+            lastSeen = this.timestamp,
+            firstSeen = this.timestamp,
+            riskScore = this.riskScore,
+            timesSeen = 1,
+            threatScore = this.riskScore.toFloat(),
+            radarAngle = baseAngle + this.angularOffset
+        )
+    }
+
+    val allRadarDevices: List<NetworkDevice>
+        get() {
+            val app = getApplication<Application>()
+            return networks.map { it.toNetworkDevice(app) } + 
+                   bluetoothDevices.map { it.toNetworkDevice(app) }
         }
-    }
-
-    fun selectDevice(device: BluetoothDeviceEntity?) {
-        selectedDevice = device
-    }
     
     val historyCount: StateFlow<Int> = scanDao.getCount()
         .stateIn(
@@ -469,6 +503,7 @@ class DashboardViewModel(
 
                         if (selectedDevice?.address == entity.address) {
                             selectedDevice = entity
+                            selectedRadarDevice = entity.toNetworkDevice(getApplication())
                         }
                     } catch (e: Exception) {
                         Log.e("BT", "Database sync failed", e)

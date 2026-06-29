@@ -106,7 +106,7 @@ fun AppNavigation(
                 RadarScreen(
                     vm = viewModel,
                     onDeviceClick = { device ->
-                        navController.navigate("device_details/BLUETOOTH/${device.address}")
+                        navController.navigate("device_details/${device.type.name}/${device.address}")
                     }
                 )
             }

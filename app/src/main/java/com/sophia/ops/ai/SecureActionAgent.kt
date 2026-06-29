@@ -57,7 +57,7 @@ class SecureActionAgent(private val context: Context, private val modelPath: Str
     /**
      * Executes AI inference. Ensure this is called from a background thread.
      */
-    fun analyzeThreatBrief(threatScore: Int, activeDevices: String): String {
+    fun generateActionAdvice(threatScore: Int, activeDevices: String): String {
         if (!isReady || llmEngine == null) {
             return "SOPHIA AI Engine Offline: Missing or uninitialized model file weights."
         }
