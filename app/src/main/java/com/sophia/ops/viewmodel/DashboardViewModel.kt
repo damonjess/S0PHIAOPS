@@ -63,7 +63,6 @@ class DashboardViewModel(
     private val bluetoothScanner = BluetoothScanner(application)
     
     init {
-        // prepareTacticalAI() // Completely deferred to activateOnDeviceAI() to prevent boot-loading
         pruneData()
         preloadOuiDatabase()
     }
@@ -91,12 +90,11 @@ class DashboardViewModel(
     private var autoRefreshJob: Job? = null
     
     private var lastScanRequestTime = 0L
-    private val minScanInterval = 8000L // 8 seconds
+    private val minScanInterval = 8000L 
 
     val networks = mutableStateListOf<WifiNetwork>()
     val bluetoothDevices = mutableStateListOf<BluetoothDeviceEntity>()
     
-    // Tracks the currently selected device from the radar
     var selectedRadarDevice by mutableStateOf<NetworkDevice?>(null)
         private set
 
@@ -106,7 +104,6 @@ class DashboardViewModel(
     var aiResponse by mutableStateOf<String?>(null)
         private set
 
-    // Completely avoid referring to the class directly at boot
     @Volatile
     private var tacticalAgent: Any? = null 
 
@@ -128,12 +125,8 @@ class DashboardViewModel(
     var strategicBrief by mutableStateOf<String?>(null)
         private set
 
-    /**
-     * Call this ONLY from a button click or user action inside your UI, 
-     * never call it inside init {} or onCreate()!
-     */
     fun activateOnDeviceAI() {
-        if (tacticalAgent != null) return // Already running safely
+        if (tacticalAgent != null) return 
         
         viewModelScope.launch(exceptionHandler) {
             isAiLoading = true
@@ -149,7 +142,6 @@ class DashboardViewModel(
                 return@launch
             }
 
-            // Force dynamic class verification safely isolated inside an IO block
             val initializedInstance = withContext(Dispatchers.IO) {
                 try {
                     Log.d(tag, "Attempting to load SecureActionAgent via reflection...")
@@ -304,7 +296,6 @@ class DashboardViewModel(
     val allRadarDevices: List<NetworkDevice>
         get() {
             val app = getApplication<Application>()
-            // Creating a new list from the current state is thread-safe in Compose snapshots
             val wifiSnapshot = networks.toList()
             val bleSnapshot = bluetoothDevices.toList()
             
@@ -359,31 +350,25 @@ class DashboardViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "NONE")
     
     fun calculateAdaptiveThreatScore(wifiCount: Int, bleCount: Int, highRiskDevices: Int): Int {
-        // Establish a baseline environment density factor
         val totalSignalDensity = wifiCount + bleCount
         
-        // Scale down raw counts if in a high-density zone to prevent immediate 100% saturation
         val densityAttenuationMultiplier = when {
-            totalSignalDensity > 1500 -> 0.15f  // Intense density (like your field test)
-            totalSignalDensity > 500  -> 0.40f  // Standard urban density
-            else                      -> 1.00f  // Quiet/Isolated perimeter
+            totalSignalDensity > 1500 -> 0.15f  
+            totalSignalDensity > 500  -> 0.40f  
+            else                      -> 1.00f  
         }
 
-        // Base score calculations using attenuated environmental metrics
         val adjustedWifiScore = (wifiCount * 0.2f) * densityAttenuationMultiplier
         val adjustedBleScore = (bleCount * 0.1f) * densityAttenuationMultiplier
         
-        // High-risk indicators (e.g., matching known malicious profiles) bypass the density filter
         val criticalVectorScore = highRiskDevices * 25 
 
-        // Merge parameters and constrain between 0% and 100%
         val finalCalculatedScore = (adjustedWifiScore + adjustedBleScore + criticalVectorScore).toInt()
         return finalCalculatedScore.coerceIn(0, 100)
     }
 
     val threatScore: Int
         get() {
-            // Use snapshots to ensure consistent reads from the state
             val (wifiSnapshot, bleSnapshot) = androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
                 networks.toList() to bluetoothDevices.toList()
             }
@@ -404,7 +389,6 @@ class DashboardViewModel(
             else -> "HIGH"
         }
 
-    // UI indicator for throttling
     var isThrottled by mutableStateOf(false)
         private set
 
@@ -451,23 +435,22 @@ class DashboardViewModel(
         val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         lastScanTime = sdf.format(Date(now))
         
-        // Remove immediate clear to avoid UI flickering
-        // bluetoothDevices.clear() 
-        
         bluetoothScanner.startDiscovery(
             onDeviceFound = { device, rssi ->
                 val name = getDisplayName(device)
 
-                viewModelScope.launch(exceptionHandler) {
+                // FIX: Run background operations entirely on Dispatchers.IO
+                viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
                     try {
                         val existing = bluetoothDao.getDeviceByAddress(device.address)
-                        val now = System.currentTimeMillis()
+                        val timestampNow = System.currentTimeMillis()
 
                         if (existing?.ignored == true) {
-                            // Ensure it's not in the UI list if it was marked as ignored elsewhere
-                            val uiIndex = bluetoothDevices.indexOfFirst { it.address == device.address }
-                            if (uiIndex != -1) {
-                                bluetoothDevices.removeAt(uiIndex)
+                            androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
+                                val uiIndex = bluetoothDevices.indexOfFirst { it.address == device.address }
+                                if (uiIndex != -1) {
+                                    bluetoothDevices.removeAt(uiIndex)
+                                }
                             }
                             return@launch
                         }
@@ -475,7 +458,7 @@ class DashboardViewModel(
                         val timesSeen = (existing?.timesSeen ?: 0) + 1
                         val risk = BluetoothRiskEngine.calculate(name, rssi, timesSeen)
 
-                        val newHistory = (existing?.signalHistory ?: emptyList()) + SignalPoint(rssi, now)
+                        val newHistory = (existing?.signalHistory ?: emptyList()) + SignalPoint(rssi, timestampNow)
                         val trimmedHistory = newHistory.takeLast(10)
 
                         @SuppressLint("MissingPermission")
@@ -485,18 +468,16 @@ class DashboardViewModel(
                                 name = sanitizedName,
                                 address = device.address,
                                 deviceType = device.type,
-                                firstSeen = now,
-                                lastSeen = now,
+                                firstSeen = timestampNow,
+                                lastSeen = timestampNow,
                                 riskScore = risk,
                                 rssi = rssi,
                                 timesSeen = 1,
                                 signalHistory = trimmedHistory
                             )
                             bluetoothDao.insert(newEntity)
-                            Log.d("BT", "New device persisted: ${newEntity.address}")
                             newEntity
                         } else {
-                            // Update name if we just found a real one, otherwise keep existing
                             val isNewNameAvailable = !name.isNullOrBlank() && !name.startsWith("Discovered Device")
                             val finalName = if (isNewNameAvailable) {
                                 name
@@ -506,7 +487,7 @@ class DashboardViewModel(
 
                             val updatedEntity = existing.copy(
                                 name = finalName,
-                                lastSeen = now,
+                                lastSeen = timestampNow,
                                 riskScore = risk,
                                 rssi = rssi,
                                 timesSeen = timesSeen,
@@ -514,25 +495,25 @@ class DashboardViewModel(
                             )
 
                             bluetoothDao.updateDevice(updatedEntity)
-                            Log.d("BT", "Existing device updated: ${updatedEntity.address}")
                             updatedEntity
                         }
 
-                        // Sync with UI list: Perform the index check and update atomically on the Main thread
-                        val currentList = bluetoothDevices
-                        val uiIndex = currentList.indexOfFirst { it.address == device.address }
-                        if (uiIndex != -1) {
-                            // Only update if something actually changed to reduce recomposition
-                            if (currentList[uiIndex].rssi != entity.rssi || currentList[uiIndex].name != entity.name) {
-                                currentList[uiIndex] = entity
+                        // FIX: Safely mutate Compose state tracking atomically 
+                        androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
+                            val currentList = bluetoothDevices
+                            val uiIndex = currentList.indexOfFirst { it.address == device.address }
+                            if (uiIndex != -1) {
+                                if (currentList[uiIndex].rssi != entity.rssi || currentList[uiIndex].name != entity.name) {
+                                    currentList[uiIndex] = entity
+                                }
+                            } else {
+                                currentList.add(entity)
                             }
-                        } else {
-                            currentList.add(entity)
-                        }
 
-                        if (selectedDevice?.address == entity.address) {
-                            selectedDevice = entity
-                            selectedRadarDevice = entity.toNetworkDevice(getApplication())
+                            if (selectedDevice?.address == entity.address) {
+                                selectedDevice = entity
+                                selectedRadarDevice = entity.toNetworkDevice(getApplication())
+                            }
                         }
                     } catch (e: Exception) {
                         Log.e("BT", "Database sync failed", e)
@@ -547,13 +528,8 @@ class DashboardViewModel(
         )
         
         scanner.startScan { results ->
-            // If the scanner returned immediately without a broadcast, it was likely throttled
-            // We can infer this by checking if startScan internal logic reported success or if it's returning cached
-            // For simplicity in the UI, we'll assume fresh results arrive if they were processed via the scanner's callback
-            // after a real trigger. However, let's make it more explicit.
-            
             Log.i(tag, "Callback: Received ${results.size} results.")
-            isThrottled = false // Reset throttle indicator on new callback
+            isThrottled = false 
             lastScanWasLive = true
             
             val updatedList = results.mapNotNull {
@@ -567,22 +543,20 @@ class DashboardViewModel(
                     security = it.capabilities,
                     riskScore = risk,
                     timestamp = System.currentTimeMillis(),
-                    angularOffset = Random.nextFloat() * 10f - 5f // Small random angle drift
+                    angularOffset = Random.nextFloat() * 10f - 5f 
                 )
             }
 
-            // Perform list update atomically to prevent ConcurrentModificationException in UI readers
             androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
                 networks.clear()
                 networks.addAll(updatedList)
             }
 
-            // Save scan session and networks
-            viewModelScope.launch(exceptionHandler) {
+            // FIX: Explicitly run database updates on Dispatchers.IO
+            viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
                 try {
                     wifiDao.insertAll(updatedList)
                     saveScanSession()
-                    // Force AI analysis for the field test
                     analyzeThreat()
                 } catch (e: Exception) {
                     Log.e(tag, "Failed to persist WiFi networks", e)
@@ -607,7 +581,6 @@ class DashboardViewModel(
                 threatScore = currentThreat
             )
             scanDao.insert(session)
-            Log.d(tag, "Scan session saved with threat score: $currentThreat")
         } catch (e: Exception) {
             Log.e(tag, "Failed to save scan session", e)
         }
@@ -615,28 +588,25 @@ class DashboardViewModel(
 
     private fun fuzzExistingSignals() {
         if (networks.isEmpty()) return
-        isThrottled = true // Show indicator
+        isThrottled = true 
         lastScanWasLive = false
         
         Log.d(tag, "Applying aggressive signal fuzz to keep radar alive.")
-        // Perform the entire fuzzing operation inside a single mutable snapshot to ensure consistency
         androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
             val currentList = networks
             for (i in currentList.indices) {
                 val net = currentList[i]
-                // Randomly nudge signal and angle to make them move
                 val newSignal = net.signal + Random.nextInt(-2, 3) 
                 val newAngle = net.angularOffset + (Random.nextFloat() * 4f - 2f)
                 
                 currentList[i] = net.copy(
                     signal = newSignal.coerceIn(-100, -20),
                     angularOffset = newAngle.coerceIn(-15f, 15f),
-                    timestamp = System.currentTimeMillis() // Update timestamp to show "activity"
+                    timestamp = System.currentTimeMillis() 
                 )
             }
         }
         
-        // Reset throttled state after a short while so it flashes
         viewModelScope.launch(exceptionHandler) {
             delay(1000)
             isThrottled = false
@@ -645,10 +615,8 @@ class DashboardViewModel(
 
     @SuppressLint("MissingPermission")
     private fun getDisplayName(device: BluetoothDevice): String? {
-        // 1. Check if the device is already paired (bonded) for a high-quality name
         val adapter = BluetoothAdapter.getDefaultAdapter()
         
-        // Safety check for BLUETOOTH_CONNECT permission on Android 12+
         val hasConnectPermission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
             getApplication<Application>().checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
         } else {
@@ -660,46 +628,55 @@ class DashboardViewModel(
             val bondedName = bondedMatch?.name
             if (!bondedName.isNullOrBlank()) return bondedName
 
-            // 2. Try the name reported during discovery
             val name = device.name
             if (!name.isNullOrBlank()) return name
 
-            // 3. Try the alias (Android R+)
             val alias = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) device.alias else null
             if (!alias.isNullOrBlank()) return alias
         }
 
-        // 4. No name found
         return null
     }
 
     fun toggleFavourite(device: BluetoothDeviceEntity) {
         viewModelScope.launch(exceptionHandler) {
             val newState = !device.favourite
-            bluetoothDao.updateFavourite(device.address, newState)
-            val index = bluetoothDevices.indexOfFirst { it.address == device.address }
-            if (index != -1) {
-                bluetoothDevices[index] = bluetoothDevices[index].copy(favourite = newState)
+            withContext(Dispatchers.IO) {
+                bluetoothDao.updateFavourite(device.address, newState)
+            }
+            androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
+                val index = bluetoothDevices.indexOfFirst { it.address == device.address }
+                if (index != -1) {
+                    bluetoothDevices[index] = bluetoothDevices[index].copy(favourite = newState)
+                }
             }
         }
     }
 
     fun updateNickname(device: BluetoothDeviceEntity, nickname: String?) {
         viewModelScope.launch(exceptionHandler) {
-            bluetoothDao.updateNickname(device.address, nickname)
-            val index = bluetoothDevices.indexOfFirst { it.address == device.address }
-            if (index != -1) {
-                bluetoothDevices[index] = bluetoothDevices[index].copy(nickname = nickname)
+            withContext(Dispatchers.IO) {
+                bluetoothDao.updateNickname(device.address, nickname)
+            }
+            androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
+                val index = bluetoothDevices.indexOfFirst { it.address == device.address }
+                if (index != -1) {
+                    bluetoothDevices[index] = bluetoothDevices[index].copy(nickname = nickname)
+                }
             }
         }
     }
 
     fun updateNotes(device: BluetoothDeviceEntity, notes: String?) {
         viewModelScope.launch(exceptionHandler) {
-            bluetoothDao.updateNotes(device.address, notes)
-            val index = bluetoothDevices.indexOfFirst { it.address == device.address }
-            if (index != -1) {
-                bluetoothDevices[index] = bluetoothDevices[index].copy(notes = notes)
+            withContext(Dispatchers.IO) {
+                bluetoothDao.updateNotes(device.address, notes)
+            }
+            androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
+                val index = bluetoothDevices.indexOfFirst { it.address == device.address }
+                if (index != -1) {
+                    bluetoothDevices[index] = bluetoothDevices[index].copy(notes = notes)
+                }
             }
         }
     }
