@@ -27,6 +27,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -40,6 +41,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.random.Random
+import kotlin.jvm.Volatile
 
 class DashboardViewModel(
     application: Application
@@ -47,6 +49,10 @@ class DashboardViewModel(
 
     private val tag = "DashboardViewModel"
     
+    private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Log.e("CRASH_DEBUG", "Uncaught Exception in ViewModel scope", throwable)
+    }
+
     private val db = SophiaDatabase.getInstance(application)
     
     private val bluetoothDao = db.bluetoothDao()
@@ -59,6 +65,13 @@ class DashboardViewModel(
     init {
         // prepareTacticalAI() // Completely deferred to activateOnDeviceAI() to prevent boot-loading
         pruneData()
+        preloadOuiDatabase()
+    }
+
+    private fun preloadOuiDatabase() {
+        viewModelScope.launch(Dispatchers.IO) {
+            OuiLookup.getVendor(getApplication(), "00:00:00:00:00:00")
+        }
     }
 
     private fun pruneData() {
@@ -94,6 +107,7 @@ class DashboardViewModel(
         private set
 
     // Completely avoid referring to the class directly at boot
+    @Volatile
     private var tacticalAgent: Any? = null 
 
     val isAiReady: Boolean
@@ -121,7 +135,7 @@ class DashboardViewModel(
     fun activateOnDeviceAI() {
         if (tacticalAgent != null) return // Already running safely
         
-        viewModelScope.launch {
+        viewModelScope.launch(exceptionHandler) {
             isAiLoading = true
             aiInitializationFailed = false
             
@@ -136,8 +150,9 @@ class DashboardViewModel(
             }
 
             // Force dynamic class verification safely isolated inside an IO block
-            val initResult = withContext(Dispatchers.IO) {
+            val initializedInstance = withContext(Dispatchers.IO) {
                 try {
+                    Log.d(tag, "Attempting to load SecureActionAgent via reflection...")
                     val agentClass = Class.forName("com.sophia.ops.ai.SecureActionAgent")
                     val constructor = agentClass.getConstructor(android.content.Context::class.java, String::class.java)
                     val instance = constructor.newInstance(getApplication<Application>(), targetPath)
@@ -146,24 +161,25 @@ class DashboardViewModel(
                     val result = initMethod.invoke(instance) as Boolean
                     
                     if (result) {
-                        tacticalAgent = instance
-                        Result.success(true)
+                        Log.i(tag, "SecureActionAgent initialized successfully via reflection.")
+                        instance
                     } else {
-                        Result.failure(Exception("Engine reports failure (check logcat/weights)"))
+                        Log.e(tag, "SecureActionAgent reports failure during initialization.")
+                        null
                     }
                 } catch (t: Throwable) {
-                    t.printStackTrace()
-                    Result.failure(t)
+                    Log.e(tag, "Reflection-based AI initialization failed", t)
+                    null
                 }
             }
 
-            if (initResult.isSuccess) {
+            if (initializedInstance != null) {
+                tacticalAgent = initializedInstance
                 aiInitializationFailed = false
                 aiAdviceText = "SOPHIA AI Engine Online. Awaiting threat metrics..."
             } else {
                 aiInitializationFailed = true
-                val error = initResult.exceptionOrNull()?.localizedMessage ?: "Unknown link error"
-                aiAdviceText = "AI Failed: $error"
+                aiAdviceText = "AI Failed to initialize (check weights or logcat)"
             }
             isAiLoading = false
         }
@@ -171,62 +187,66 @@ class DashboardViewModel(
 
     fun analyzeThreat() {
         if (isAnalyzing) return
-        viewModelScope.launch {
+        Log.i(tag, "analyzeThreat() triggered. AI Ready: $isAiReady")
+        viewModelScope.launch(exceptionHandler) {
             isAnalyzing = true
             
-            val wifiCount = networks.size
-            val bleCount = bluetoothDevices.size
-            val totalCount = wifiCount + bleCount
-            val currentThreatScore = threatScore
+            try {
+                val wifiCount = networks.size
+                val bleCount = bluetoothDevices.size
+                val totalCount = wifiCount + bleCount
+                val currentThreatScore = threatScore
+                Log.d(tag, "Analyzing threat: $wifiCount WiFi, $bleCount BLE. Score: $currentThreatScore")
 
-            val environmentType = when {
-                totalCount > 1500 -> "Ultra-Dense Urban / Electronic Saturation Zone"
-                totalCount > 500  -> "Standard Congestion Zone"
-                else              -> "Low-Noise / Isolated Perimeter"
-            }
+                val environmentType = when {
+                    totalCount > 1500 -> "Ultra-Dense Urban / Electronic Saturation Zone"
+                    totalCount > 500  -> "Standard Congestion Zone"
+                    else              -> "Low-Noise / Isolated Perimeter"
+                }
 
-            val telemetryPayload = """
-                Density Context: $environmentType
-                Raw Environment Signals: $wifiCount Wi-Fi, $bleCount Bluetooth nodes.
-                Active Countermeasures Status: Adaptive attenuation active. Persistent targets identified.
-            """.trimIndent()
-            
-            val agentInstance = tacticalAgent
-            if (agentInstance != null) {
-                try {
+                val telemetryPayload = """
+                    Density Context: $environmentType
+                    Raw Environment Signals: $wifiCount Wi-Fi, $bleCount Bluetooth nodes.
+                    Active Countermeasures Status: Adaptive attenuation active. Persistent targets identified.
+                """.trimIndent()
+                
+                val agentInstance = tacticalAgent
+                if (agentInstance != null) {
                     val agentClass = agentInstance.javaClass
+                    Log.d(tag, "Invoking AI agent: ${agentClass.simpleName}")
                     
-                    // FIX: Use javaPrimitiveType for 'int' parameter to match Kotlin's 'Int'
                     val analyzeMethod = agentClass.getMethod(
                         "generateActionAdvice", 
                         Int::class.javaPrimitiveType, 
                         String::class.java
                     )
                     
-                    val generatedBrief = withContext(Dispatchers.Default) {
+                    Log.d(tag, "Method found, executing on IO thread...")
+                    val generatedBrief = withContext(Dispatchers.IO) {
                         analyzeMethod.invoke(agentInstance, currentThreatScore, telemetryPayload) as String
                     }
                     
+                    Log.i(tag, "AI generation complete: ${generatedBrief.take(20)}...")
                     aiAdviceText = generatedBrief
                     aiResponse = generatedBrief
                     
-                    // Strategic brief for high-threat scenarios (> 70%)
                     if (currentThreatScore > 70) {
                         strategicBrief = generatedBrief
                     } else {
                         strategicBrief = null
                     }
-                } catch (t: Throwable) {
-                    t.printStackTrace()
-                    aiAdviceText = "Tactical generation suspended: Subsystem mismatch."
-                    strategicBrief = "Strategic analysis failed due to a native subsystem error."
+                } else {
+                    Log.w(tag, "AI agent not initialized, skipping analysis.")
+                    aiAdviceText = "AI Engine Standby. Click to initialize."
+                    strategicBrief = null
                 }
-            } else {
-                aiAdviceText = "AI Engine Standby. Click to initialize."
-                strategicBrief = null
+            } catch (t: Throwable) {
+                Log.e("CRASH_DEBUG", "AI analysis failed internally", t)
+                aiAdviceText = "Tactical generation suspended: Subsystem error."
+                strategicBrief = "Strategic analysis failed."
+            } finally {
+                isAnalyzing = false
             }
-
-            isAnalyzing = false
         }
     }
 
@@ -284,8 +304,10 @@ class DashboardViewModel(
     val allRadarDevices: List<NetworkDevice>
         get() {
             val app = getApplication<Application>()
+            // Creating a new list from the current state is thread-safe in Compose snapshots
             val wifiSnapshot = networks.toList()
             val bleSnapshot = bluetoothDevices.toList()
+            
             return wifiSnapshot.map { it.toNetworkDevice(app) } + 
                    bleSnapshot.map { it.toNetworkDevice(app) }
         }
@@ -361,8 +383,10 @@ class DashboardViewModel(
 
     val threatScore: Int
         get() {
-            val wifiSnapshot = networks.toList()
-            val bleSnapshot = bluetoothDevices.toList()
+            // Use snapshots to ensure consistent reads from the state
+            val (wifiSnapshot, bleSnapshot) = androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
+                networks.toList() to bluetoothDevices.toList()
+            }
             val highRiskWifi = wifiSnapshot.count { it.riskScore > 60 }
             val highRiskBle = bleSnapshot.count { it.riskScore > 60 }
             
@@ -434,7 +458,7 @@ class DashboardViewModel(
             onDeviceFound = { device, rssi ->
                 val name = getDisplayName(device)
 
-                viewModelScope.launch {
+                viewModelScope.launch(exceptionHandler) {
                     try {
                         val existing = bluetoothDao.getDeviceByAddress(device.address)
                         val now = System.currentTimeMillis()
@@ -494,15 +518,16 @@ class DashboardViewModel(
                             updatedEntity
                         }
 
-                        // Sync with UI list: If risk is 0 (transient), we keep it in DB but can choose to exclude from UI 
-                        // to reduce noise, or just let it stay with 0 risk. 
-                        // The user said "categorized as background noise, dropping their threat weight to zero".
-                        // Let's keep them in the list so they are visible on Radar but don't impact the main Score.
-                        val uiIndex = bluetoothDevices.indexOfFirst { it.address == device.address }
+                        // Sync with UI list: Perform the index check and update atomically on the Main thread
+                        val currentList = bluetoothDevices
+                        val uiIndex = currentList.indexOfFirst { it.address == device.address }
                         if (uiIndex != -1) {
-                            bluetoothDevices[uiIndex] = entity
+                            // Only update if something actually changed to reduce recomposition
+                            if (currentList[uiIndex].rssi != entity.rssi || currentList[uiIndex].name != entity.name) {
+                                currentList[uiIndex] = entity
+                            }
                         } else {
-                            bluetoothDevices.add(entity)
+                            currentList.add(entity)
                         }
 
                         if (selectedDevice?.address == entity.address) {
@@ -546,11 +571,14 @@ class DashboardViewModel(
                 )
             }
 
-            networks.clear()
-            networks.addAll(updatedList)
+            // Perform list update atomically to prevent ConcurrentModificationException in UI readers
+            androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
+                networks.clear()
+                networks.addAll(updatedList)
+            }
 
             // Save scan session and networks
-            viewModelScope.launch {
+            viewModelScope.launch(exceptionHandler) {
                 try {
                     wifiDao.insertAll(updatedList)
                     saveScanSession()
@@ -568,14 +596,18 @@ class DashboardViewModel(
 
     private suspend fun saveScanSession() {
         try {
+            val wifiCount = networks.size
+            val bleCount = bluetoothDevices.size
+            val currentThreat = threatScore
+            
             val session = ScanSession(
                 timestamp = System.currentTimeMillis(),
-                wifiCount = networks.size,
-                bluetoothCount = bluetoothDevices.size,
-                threatScore = threatScore
+                wifiCount = wifiCount,
+                bluetoothCount = bleCount,
+                threatScore = currentThreat
             )
             scanDao.insert(session)
-            Log.d(tag, "Scan session saved: ${session.threatScore} threat score")
+            Log.d(tag, "Scan session saved with threat score: $currentThreat")
         } catch (e: Exception) {
             Log.e(tag, "Failed to save scan session", e)
         }
@@ -587,21 +619,25 @@ class DashboardViewModel(
         lastScanWasLive = false
         
         Log.d(tag, "Applying aggressive signal fuzz to keep radar alive.")
-        for (i in networks.indices) {
-            val net = networks[i]
-            // Randomly nudge signal and angle to make them move
-            val newSignal = net.signal + Random.nextInt(-2, 3) 
-            val newAngle = net.angularOffset + (Random.nextFloat() * 4f - 2f)
-            
-            networks[i] = net.copy(
-                signal = newSignal.coerceIn(-100, -20),
-                angularOffset = newAngle.coerceIn(-15f, 15f),
-                timestamp = System.currentTimeMillis() // Update timestamp to show "activity"
-            )
+        // Perform the entire fuzzing operation inside a single mutable snapshot to ensure consistency
+        androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
+            val currentList = networks
+            for (i in currentList.indices) {
+                val net = currentList[i]
+                // Randomly nudge signal and angle to make them move
+                val newSignal = net.signal + Random.nextInt(-2, 3) 
+                val newAngle = net.angularOffset + (Random.nextFloat() * 4f - 2f)
+                
+                currentList[i] = net.copy(
+                    signal = newSignal.coerceIn(-100, -20),
+                    angularOffset = newAngle.coerceIn(-15f, 15f),
+                    timestamp = System.currentTimeMillis() // Update timestamp to show "activity"
+                )
+            }
         }
         
         // Reset throttled state after a short while so it flashes
-        viewModelScope.launch {
+        viewModelScope.launch(exceptionHandler) {
             delay(1000)
             isThrottled = false
         }
@@ -638,7 +674,7 @@ class DashboardViewModel(
     }
 
     fun toggleFavourite(device: BluetoothDeviceEntity) {
-        viewModelScope.launch {
+        viewModelScope.launch(exceptionHandler) {
             val newState = !device.favourite
             bluetoothDao.updateFavourite(device.address, newState)
             val index = bluetoothDevices.indexOfFirst { it.address == device.address }
@@ -649,7 +685,7 @@ class DashboardViewModel(
     }
 
     fun updateNickname(device: BluetoothDeviceEntity, nickname: String?) {
-        viewModelScope.launch {
+        viewModelScope.launch(exceptionHandler) {
             bluetoothDao.updateNickname(device.address, nickname)
             val index = bluetoothDevices.indexOfFirst { it.address == device.address }
             if (index != -1) {
@@ -659,7 +695,7 @@ class DashboardViewModel(
     }
 
     fun updateNotes(device: BluetoothDeviceEntity, notes: String?) {
-        viewModelScope.launch {
+        viewModelScope.launch(exceptionHandler) {
             bluetoothDao.updateNotes(device.address, notes)
             val index = bluetoothDevices.indexOfFirst { it.address == device.address }
             if (index != -1) {

@@ -6,8 +6,10 @@ import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.jvm.Volatile
 
 object CyberDefenseAnalyst {
+    @Volatile
     private var llmInference: LlmInference? = null
     private const val MODEL_PATH = "/data/local/tmp/gemma-2b-it-cpu.bin"
 
@@ -39,7 +41,7 @@ object CyberDefenseAnalyst {
     /**
      * Generates a defense strategy based on the current threat metrics.
      */
-    suspend fun analyzeThreat(threatScore: Int, deviceCount: Int): String = withContext(Dispatchers.Default) {
+    suspend fun analyzeThreat(threatScore: Int, deviceCount: Int): String = withContext(Dispatchers.IO) {
         val prompt = """
             You are an autonomous cyber-defense analyst for the SOPHIA OPS tactical system.
             Current Environment:
@@ -51,7 +53,11 @@ object CyberDefenseAnalyst {
         """.trimIndent()
 
         return@withContext try {
-            llmInference?.generateResponse(prompt) ?: "Analyst offline: Model not initialized."
+            // Ensure generateResponse is called on a background thread consistently.
+            // Using synchronized to prevent concurrent access to the engine if it's not thread-safe.
+            synchronized(this) {
+                llmInference?.generateResponse(prompt) ?: "Analyst offline: Model not initialized."
+            }
         } catch (e: Exception) {
             "Analyst Error: ${e.localizedMessage}"
         }

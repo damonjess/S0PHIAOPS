@@ -5,9 +5,11 @@ import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.jvm.Volatile
 
 class SecureActionAgent(private val context: Context, private val modelPath: String) {
 
+    @Volatile
     private var llmEngine: LlmInference? = null
     
     // Status flag to report back to your ViewModels safely
@@ -72,8 +74,11 @@ class SecureActionAgent(private val context: Context, private val modelPath: Str
         """.trimIndent()
 
         return try {
-            llmEngine?.generateResponse(prompt) ?: "Inference engine failed to respond."
-        } catch (e: Exception) {
+            synchronized(this) {
+                llmEngine?.generateResponse(prompt) ?: "Inference engine failed to respond."
+            }
+        } catch (e: Throwable) {
+            android.util.Log.e("SecureActionAgent", "Inference failed", e)
             "Analysis failed: ${e.localizedMessage}"
         }
     }
