@@ -54,7 +54,7 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
 
 @Composable
 fun AppNavigation(
-    viewModel: DashboardViewModel
+    viewModel: DashboardViewModel,
 ) {
     val navController = rememberNavController()
     val items = listOf(
@@ -99,8 +99,7 @@ fun AppNavigation(
                     vm = viewModel,
                     onNavigateToRadar = { navController.navigate(Routes.RADAR) },
                     onNavigateToDevices = { navController.navigate(Routes.DEVICES) },
-                    onNavigateToHistory = { navController.navigate(Routes.HISTORY) }
-                )
+                ) { navController.navigate(Routes.HISTORY) }
             }
             composable(Routes.RADAR) {
                 RadarScreen(

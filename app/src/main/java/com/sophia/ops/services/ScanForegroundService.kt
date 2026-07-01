@@ -20,7 +20,7 @@ import com.sophia.ops.data.entities.WifiNetwork
 import com.sophia.ops.wifi.RiskEngine
 import com.sophia.ops.wifi.WifiScanner
 import kotlinx.coroutines.*
-import kotlin.random.Random
+import kotlin.time.Duration.Companion.milliseconds
 
 class ScanForegroundService : Service() {
 
@@ -61,15 +61,11 @@ class ScanForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = createNotification("Scanning for devices...")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID, 
-                notification, 
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        startForeground(
+            NOTIFICATION_ID, 
+            notification, 
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+        )
 
         startScanning()
 
@@ -84,7 +80,7 @@ class ScanForegroundService : Service() {
                 Log.d(TAG, "Background scan triggered")
                 performWifiScan()
                 performBluetoothScan()
-                delay(30000) // Scan every 30 seconds in background
+                delay(30000.milliseconds) // Scan every 30 seconds in background
             }
         }
     }
@@ -94,7 +90,7 @@ class ScanForegroundService : Service() {
             val updatedList = results.map {
                 val risk = RiskEngine.calculate(it.capabilities, it.level)
                 WifiNetwork(
-                    ssid = it.SSID,
+                    ssid = @Suppress("DEPRECATION") it.SSID,
                     bssid = it.BSSID,
                     signal = it.level,
                     security = it.capabilities,
@@ -117,7 +113,7 @@ class ScanForegroundService : Service() {
                         if (ActivityCompat.checkSelfPermission(this@ScanForegroundService, android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
                             device.name
                         } else null
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                         null
                     }
                     val existing = db.bluetoothDao().getDeviceByAddress(device.address)
@@ -189,8 +185,8 @@ class ScanForegroundService : Service() {
     }
 
     private fun updateNotification(content: String) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ActivityCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        if ((Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) &&
+            (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
         ) {
             return
         }

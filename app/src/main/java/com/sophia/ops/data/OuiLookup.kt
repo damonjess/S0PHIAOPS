@@ -23,12 +23,12 @@ object OuiLookup {
             // ensure it's at least not reloading if it fails once.
             synchronized(lock) {
                 if (database == null) {
-                    try {
+                    database = try {
                         val jsonString = context.assets.open("oui_database.json").bufferedReader().use { it.readText() }
-                        database = JSONObject(jsonString)
+                        JSONObject(jsonString)
                     } catch (e: Exception) {
                         android.util.Log.e("OuiLookup", "Failed to load OUI database", e)
-                        database = JSONObject() // Empty object to avoid re-trying and crashing
+                        JSONObject() // Empty object to avoid re-trying and crashing
                     }
                 }
             }

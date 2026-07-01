@@ -3,6 +3,7 @@ package com.sophia.ops.bluetooth
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
@@ -17,10 +18,10 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 
 class BluetoothScanner(
-    private val context: Context
+    private val context: Context,
 ) {
     private val tag = "BluetoothScanner"
-    private val adapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
+    private val adapter: BluetoothAdapter? = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
     private val handler = Handler(Looper.getMainLooper())
 
     @SuppressLint("MissingPermission")
@@ -80,8 +81,8 @@ class BluetoothScanner(
                 Log.i(tag, "LE Scan started in LOW_LATENCY (Max Power) mode")
             } catch (e: SecurityException) {
                 Log.e(tag, "SecurityException starting LE scan", e)
-            } catch (e: Exception) {
-                Log.e(tag, "Failed to start LE scan", e)
+            } catch (_: Exception) {
+                Log.e(tag, "Failed to start LE scan")
             }
         }
 
@@ -118,7 +119,7 @@ class BluetoothScanner(
                         try {
                             leScanner?.stopScan(leCallback)
                             context?.unregisterReceiver(this)
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             // Already unregistered
                         }
                         onDiscoveryFinished()
@@ -128,11 +129,15 @@ class BluetoothScanner(
         }
 
         // Safety timeout to stop LE scan if discovery finished broadcast is missed
-        handler.postDelayed({
-            try {
-                leScanner?.stopScan(leCallback)
-            } catch (e: Exception) {}
-        }, 15000)
+        handler.postDelayed(
+            {
+                try {
+                    leScanner?.stopScan(leCallback)
+                } catch (_: Exception) {
+                }
+            },
+            15000,
+        )
 
         val filter = IntentFilter().apply {
             addAction(BluetoothDevice.ACTION_FOUND)
@@ -171,16 +176,16 @@ class BluetoothScanner(
 
             if (!started) {
                 try {
-                    context?.unregisterReceiver(receiver)
-                } catch (e: Exception) {
+                    context.unregisterReceiver(receiver)
+                } catch (_: Exception) {
                     // Ignore
                 }
             }
-        } catch (e: Exception) {
-            Log.e(tag, "Error during discovery start", e)
+        } catch (_: Exception) {
+            Log.e(tag, "Error during discovery start")
             try {
-                context?.unregisterReceiver(receiver)
-            } catch (ex: Exception) { }
+                context.unregisterReceiver(receiver)
+            } catch (_: Exception) { }
         }
     }
 }

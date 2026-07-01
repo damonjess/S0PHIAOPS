@@ -1,8 +1,9 @@
 package com.sophia.ops.viewmodel
 
 import android.app.Application
-import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -16,7 +17,6 @@ import com.sophia.ops.data.OuiLookup
 import com.sophia.ops.data.db.SophiaDatabase
 import com.sophia.ops.bluetooth.BluetoothScanner
 import com.sophia.ops.bluetooth.BluetoothRiskEngine
-import com.sophia.ops.ai.CyberDefenseAnalyst
 import com.sophia.ops.wifi.RiskEngine
 import com.sophia.ops.wifi.WifiScanner
 import com.sophia.ops.model.NetworkDevice
@@ -40,11 +40,12 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.random.Random
 import kotlin.jvm.Volatile
 
 class DashboardViewModel(
-    application: Application
+    application: Application,
 ) : AndroidViewModel(application) {
 
     private val tag = "DashboardViewModel"
@@ -81,7 +82,7 @@ class DashboardViewModel(
         }
     }
     
-    var isScanning by mutableStateOf(false)
+    var isScanning by mutableStateOf(value = false)
         private set
 
     private var isWifiScanning = false
@@ -113,13 +114,13 @@ class DashboardViewModel(
     var aiAdviceText by mutableStateOf("AI Engine Standby. Click to initialize.")
         private set
 
-    var aiInitializationFailed by mutableStateOf(false)
+    var aiInitializationFailed by mutableStateOf(value = false)
         private set
 
-    var isAiLoading by mutableStateOf(false)
+    var isAiLoading by mutableStateOf(value = false)
         private set
 
-    var isAnalyzing by mutableStateOf(false)
+    var isAnalyzing by mutableStateOf(value = false)
         private set
 
     var strategicBrief by mutableStateOf<String?>(null)
@@ -146,8 +147,8 @@ class DashboardViewModel(
                 try {
                     Log.d(tag, "Attempting to load SecureActionAgent via reflection...")
                     val agentClass = Class.forName("com.sophia.ops.ai.SecureActionAgent")
-                    val constructor = agentClass.getConstructor(android.content.Context::class.java, String::class.java)
-                    val instance = constructor.newInstance(getApplication<Application>(), targetPath)
+                    val constructor = agentClass.getConstructor(Context::class.java, String::class.java)
+                    val instance = constructor.newInstance(getApplication(), targetPath)
                     
                     val initMethod = agentClass.getMethod("initializeEngine")
                     val result = initMethod.invoke(instance) as Boolean
@@ -222,10 +223,10 @@ class DashboardViewModel(
                     aiAdviceText = generatedBrief
                     aiResponse = generatedBrief
                     
-                    if (currentThreatScore > 70) {
-                        strategicBrief = generatedBrief
+                    strategicBrief = if (currentThreatScore > 70) {
+                        generatedBrief
                     } else {
-                        strategicBrief = null
+                        null
                     }
                 } else {
                     Log.w(tag, "AI agent not initialized, skipping analysis.")
@@ -251,6 +252,7 @@ class DashboardViewModel(
         selectedRadarDevice = entity?.toNetworkDevice(getApplication())
     }
 
+    @Suppress("unused")
     fun selectWifiNetwork(network: WifiNetwork?) {
         selectedRadarDevice = network?.toNetworkDevice(getApplication())
     }
@@ -270,7 +272,7 @@ class DashboardViewModel(
             riskScore = this.riskScore,
             timesSeen = this.timesSeen,
             threatScore = this.riskScore.toFloat(),
-            radarAngle = baseAngle
+            radarAngle = baseAngle,
         )
     }
 
@@ -407,7 +409,7 @@ class DashboardViewModel(
         autoRefreshJob = viewModelScope.launch {
             while (isActive) {
                 scan()
-                delay(intervalMs)
+                delay(intervalMs.milliseconds)
             }
         }
     }
@@ -419,7 +421,7 @@ class DashboardViewModel(
 
     fun scan() {
         val now = System.currentTimeMillis()
-        if (isScanning || (now - lastScanRequestTime < minScanInterval)) {
+        if (isScanning || ((now - lastScanRequestTime) < minScanInterval)) {
             Log.i(tag, "Scan skipped (in progress or cooldown).")
             fuzzExistingSignals()
             return
@@ -537,13 +539,13 @@ class DashboardViewModel(
                 if (risk == 0) return@mapNotNull null
 
                 WifiNetwork(
-                    ssid = it.SSID,
+                    ssid = @Suppress("DEPRECATION") it.SSID,
                     bssid = it.BSSID,
                     signal = it.level + Random.nextInt(-1, 2),
                     security = it.capabilities,
                     riskScore = risk,
                     timestamp = System.currentTimeMillis(),
-                    angularOffset = Random.nextFloat() * 10f - 5f 
+                    angularOffset = (Random.nextFloat() * 10f) - 5f
                 )
             }
 
@@ -608,14 +610,15 @@ class DashboardViewModel(
         }
         
         viewModelScope.launch(exceptionHandler) {
-            delay(1000)
+            delay(1000.milliseconds)
             isThrottled = false
         }
     }
 
     @SuppressLint("MissingPermission")
     private fun getDisplayName(device: BluetoothDevice): String? {
-        val adapter = BluetoothAdapter.getDefaultAdapter()
+        val manager = getApplication<Application>().getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val adapter = manager.adapter
         
         val hasConnectPermission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
             getApplication<Application>().checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -638,6 +641,7 @@ class DashboardViewModel(
         return null
     }
 
+    @Suppress("unused")
     fun toggleFavourite(device: BluetoothDeviceEntity) {
         viewModelScope.launch(exceptionHandler) {
             val newState = !device.favourite
@@ -653,6 +657,7 @@ class DashboardViewModel(
         }
     }
 
+    @Suppress("unused")
     fun updateNickname(device: BluetoothDeviceEntity, nickname: String?) {
         viewModelScope.launch(exceptionHandler) {
             withContext(Dispatchers.IO) {
@@ -667,6 +672,7 @@ class DashboardViewModel(
         }
     }
 
+    @Suppress("unused")
     fun updateNotes(device: BluetoothDeviceEntity, notes: String?) {
         viewModelScope.launch(exceptionHandler) {
             withContext(Dispatchers.IO) {

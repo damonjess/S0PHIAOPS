@@ -10,7 +10,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Column
@@ -56,18 +55,19 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavController
 import com.sophia.ops.data.entities.BluetoothDeviceEntity
 import com.sophia.ops.model.NetworkDevice
 import com.sophia.ops.data.OuiLookup
 import com.sophia.ops.viewmodel.DashboardViewModel
+import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.sin
 
 @Composable
 fun RadarScreen(
     vm: DashboardViewModel,
-    onDeviceClick: (NetworkDevice) -> Unit = {}
+    onDeviceClick: (NetworkDevice) -> Unit = {},
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "RadarSweep")
     val sweepAngle by infiniteTransition.animateFloat(
@@ -187,20 +187,19 @@ fun RadarScreen(
                     detectTapGestures { tapOffset ->
                         val center = size.width / 2f
                         val minDim = minOf(size.width, size.height).toFloat()
-                        val maxRadius = minDim / 2f
                         
                         // Find if the tap is close to any device's calculated position
                         val clickedDevice = devicesList.find { device ->
                             // 1. Re-calculate the dot's X and Y based on your radar logic
                             val normalized = ((device.signal + 100).coerceIn(0, 100)).toFloat() / 100f
                             val radius = (minDim / 2.2f) * (1f - normalized)
-                            val angleRad = Math.toRadians(device.radarAngle.toDouble())
+                            val angleRad = device.radarAngle.toDouble() * PI / 180.0
                             
-                            val dotX = center + (radius * Math.cos(angleRad)).toFloat()
-                            val dotY = center + (radius * Math.sin(angleRad)).toFloat()
+                            val dotX = center + (radius * cos(angleRad)).toFloat()
+                            val dotY = center + (radius * sin(angleRad)).toFloat()
                             
                             // 2. Calculate distance between tap and dot
-                            val distance = Math.hypot((tapOffset.x - dotX).toDouble(), (tapOffset.y - dotY).toDouble())
+                            val distance = hypot((tapOffset.x - dotX).toDouble(), (tapOffset.y - dotY).toDouble())
                             
                             // 3. Define a touch target tolerance (e.g., 24dp in pixels)
                             val touchTolerance = with(density) { 24.dp.toPx() }
@@ -241,9 +240,9 @@ fun RadarScreen(
                     )
 
                     // Draw sweep line
-                    val sweepRad = (sweepAngle * Math.PI / 180).toFloat()
-                    val sweepX = center.x + maxRadius * cos(sweepRad)
-                    val sweepY = center.y + maxRadius * sin(sweepRad)
+                    val sweepRad = (sweepAngle.toDouble() * PI / 180.0).toFloat()
+                    val sweepX = center.x + maxRadius * cos(sweepRad.toDouble()).toFloat()
+                    val sweepY = center.y + maxRadius * sin(sweepRad.toDouble()).toFloat()
 
                     drawLine(
                         color = Color.Green.copy(alpha = 0.5f),
@@ -386,7 +385,7 @@ fun RadarScreen(
                         Row {
                             device.signalHistory.takeLast(5).forEach { point ->
                                 Text(
-                                    text = "${point.rssi}",
+                                    text = point.rssi.toString(),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = when {
                                         point.rssi > -60 -> Color.Green
@@ -426,7 +425,9 @@ fun RadarScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 StatItem("Bluetooth Found", bluetoothFoundToday)
-                StatItem("Highest Threat", highestThreatToday, 
+                StatItem(
+                    label = "Highest Threat",
+                    value = highestThreatToday,
                     color = when(highestThreatToday) {
                         "HIGH" -> Color.Red
                         "MEDIUM" -> Color.Yellow
