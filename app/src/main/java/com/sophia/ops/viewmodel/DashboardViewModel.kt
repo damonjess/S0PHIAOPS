@@ -122,6 +122,7 @@ class DashboardViewModel(
     private var isBluetoothScanning = false
 
     private var autoRefreshJob: Job? = null
+    private var lastAutoRefreshInterval: Long = 5000L
     
     private var lastScanRequestTime = 0L
     private val minScanInterval = 15000L // Increased to 15s to reduce pressure during AI generation
@@ -238,6 +239,26 @@ class DashboardViewModel(
         withContext(Dispatchers.Main) { isAnalyzing = true }
         
         try {
+            val availableMb = getAvailableMemory()
+            Log.i(tag, "Memory check: ${availableMb}MB available.")
+            
+            if (availableMb < 600) {
+                withContext(Dispatchers.Main) {
+                    aiAdviceText = "AI Offline: Low Memory (${availableMb}MB)"
+                    aiResponse = "Insufficient RAM for Gemma-2B (${availableMb}MB). AI analysis disabled to prevent crash."
+                    isAnalyzing = false
+                }
+                analysisInProgress.set(false)
+                return
+            }
+
+            // Prevent concurrent system pressure by suspending auto-refresh
+            val wasRefreshing = autoRefreshJob != null
+            if (wasRefreshing) {
+                Log.d(tag, "Suspending auto-refresh for AI task.")
+                stopAutoRefresh()
+            }
+
             val wifiCount = snapshot.networks.size
             val bleCount = snapshot.bluetoothDevices.size
             val totalCount = wifiCount + bleCount
@@ -280,6 +301,12 @@ class DashboardViewModel(
                     strategicBrief = null
                 }
             }
+
+            // Restore auto-refresh if it was active
+            if (wasRefreshing) {
+                Log.d(tag, "Resuming auto-refresh after AI task.")
+                startAutoRefresh(lastAutoRefreshInterval)
+            }
         } catch (t: Throwable) {
             Log.e("CRASH_DEBUG", "AI analysis failed internally", t)
             withContext(Dispatchers.Main) {
@@ -290,6 +317,13 @@ class DashboardViewModel(
             withContext(Dispatchers.Main) { isAnalyzing = false }
             analysisInProgress.set(false)
         }
+    }
+
+    private fun getAvailableMemory(): Long {
+        val activityManager = getApplication<Application>().getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val memoryInfo = android.app.ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memoryInfo)
+        return memoryInfo.availMem / (1024 * 1024)
     }
 
     fun selectDevice(device: NetworkDevice?) {
@@ -453,6 +487,7 @@ class DashboardViewModel(
         get() = if (lastScanWasLive) "🟢 LIVE" else "🟠 THROTTLED"
 
     fun startAutoRefresh(intervalMs: Long) {
+        lastAutoRefreshInterval = intervalMs
         if (autoRefreshJob != null) return
         
         autoRefreshJob = viewModelScope.launch {
@@ -610,7 +645,8 @@ class DashboardViewModel(
                     try {
                         wifiDao.insertAll(updatedList)
                         saveScanSession()
-                        analyzeThreat()
+                        // Automatic AI analysis removed to prevent native crashes on low-RAM devices
+                        // analyzeThreat()
                     } catch (e: Exception) {
                         Log.e(tag, "Failed to persist WiFi networks", e)
                     } finally {

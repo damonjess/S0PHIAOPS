@@ -474,6 +474,16 @@ fun RadarScreen(
                             color = Color.White,
                             style = MaterialTheme.typography.bodyMedium
                         )
+                        if (vm.aiResponse == null && !vm.isAnalyzing) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = { vm.analyzeThreat() },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Green.copy(alpha = 0.5f))
+                            ) {
+                                Text("RUN THREAT ANALYSIS")
+                            }
+                        }
                     }
                 }
             }
