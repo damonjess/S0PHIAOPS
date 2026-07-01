@@ -25,6 +25,9 @@ import android.util.Log
 import android.annotation.SuppressLint
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -35,11 +38,13 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.random.Random
@@ -50,6 +55,18 @@ class DashboardViewModel(
 ) : AndroidViewModel(application) {
 
     private val tag = "DashboardViewModel"
+
+    // Dedicated single thread and scope for all on-device AI work — the engine 
+    // must always be created and invoked from exactly the same thread.
+    private val aiDispatcher = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "SOPHIA-AI-Thread")
+    }.asCoroutineDispatcher()
+    
+    private val aiScope = CoroutineScope(aiDispatcher + SupervisorJob())
+    
+    // Channel for debouncing AI requests. CONFLATED ensures we only process the LATEST
+    // request if multiple scans finish while the AI is busy.
+    private val aiRequestChannel = Channel<Unit>(Channel.CONFLATED)
     
     private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
         Log.e("CRASH_DEBUG", "Uncaught Exception in ViewModel scope", throwable)
@@ -67,6 +84,15 @@ class DashboardViewModel(
     init {
         pruneData()
         preloadOuiDatabase()
+        startAiRequestObserver()
+    }
+
+    private fun startAiRequestObserver() {
+        aiScope.launch(exceptionHandler) {
+            for (request in aiRequestChannel) {
+                processAiAnalysis()
+            }
+        }
     }
 
     private fun preloadOuiDatabase() {
@@ -92,7 +118,7 @@ class DashboardViewModel(
     private var autoRefreshJob: Job? = null
     
     private var lastScanRequestTime = 0L
-    private val minScanInterval = 8000L 
+    private val minScanInterval = 15000L // Increased to 15s to reduce pressure during AI generation
 
     val networks = mutableStateListOf<WifiNetwork>()
     val bluetoothDevices = mutableStateListOf<BluetoothDeviceEntity>()
@@ -132,13 +158,13 @@ class DashboardViewModel(
     fun activateOnDeviceAI() {
         if (tacticalAgent != null) return 
         
-        viewModelScope.launch(exceptionHandler) {
+        aiScope.launch(exceptionHandler) {
             isAiLoading = true
             aiInitializationFailed = false
             
             val targetPath = "/data/local/tmp/gemma-2b-it-cpu.bin"
             
-            val fileExists = withContext(Dispatchers.IO) { File(targetPath).exists() }
+            val fileExists = File(targetPath).exists()
             if (!fileExists) {
                 aiInitializationFailed = true
                 aiAdviceText = "AI weights file missing at: $targetPath"
@@ -146,108 +172,94 @@ class DashboardViewModel(
                 return@launch
             }
 
-            val initializedInstance = withContext(Dispatchers.IO) {
-                try {
-                    Log.d(tag, "Attempting to load SecureActionAgent via reflection...")
-                    val agentClass = Class.forName("com.sophia.ops.ai.SecureActionAgent")
-                    val constructor = agentClass.getConstructor(Context::class.java, String::class.java)
-                    val instance = constructor.newInstance(getApplication(), targetPath)
-                    
-                    val initMethod = agentClass.getMethod("initializeEngine")
-                    val result = initMethod.invoke(instance) as Boolean
-                    
-                    if (result) {
-                        Log.i(tag, "SecureActionAgent initialized successfully via reflection.")
-                        instance
-                    } else {
-                        Log.e(tag, "SecureActionAgent reports failure during initialization.")
-                        null
-                    }
-                } catch (t: Throwable) {
-                    Log.e(tag, "Reflection-based AI initialization failed", t)
-                    null
+            try {
+                Log.d(tag, "Attempting to load SecureActionAgent via reflection on thread: ${Thread.currentThread().name}")
+                val agentClass = Class.forName("com.sophia.ops.ai.SecureActionAgent")
+                val constructor = agentClass.getConstructor(Context::class.java, String::class.java)
+                val instance = constructor.newInstance(getApplication(), targetPath)
+                
+                val initMethod = agentClass.getMethod("initializeEngine")
+                val result = initMethod.invoke(instance) as Boolean
+                
+                if (result) {
+                    Log.i(tag, "SecureActionAgent initialized successfully.")
+                    tacticalAgent = instance
+                    aiInitializationFailed = false
+                    aiAdviceText = "SOPHIA AI Engine Online. Awaiting threat metrics..."
+                } else {
+                    Log.e(tag, "SecureActionAgent reports failure during initialization.")
+                    aiInitializationFailed = true
+                    aiAdviceText = "AI Failed to initialize (check weights or logcat)"
                 }
-            }
-
-            if (initializedInstance != null) {
-                tacticalAgent = initializedInstance
-                aiInitializationFailed = false
-                aiAdviceText = "SOPHIA AI Engine Online. Awaiting threat metrics..."
-            } else {
+                isAiLoading = false
+            } catch (t: Throwable) {
+                Log.e(tag, "Reflection-based AI initialization failed", t)
                 aiInitializationFailed = true
-                aiAdviceText = "AI Failed to initialize (check weights or logcat)"
+                aiAdviceText = "AI Subsystem Error: ${t.localizedMessage}"
+                isAiLoading = false
             }
-            isAiLoading = false
         }
     }
 
     fun analyzeThreat() {
+        Log.i(tag, "analyzeThreat() requested. AI Ready: $isAiReady")
+        aiRequestChannel.trySend(Unit)
+    }
+
+    private fun processAiAnalysis() {
         if (!analysisInProgress.compareAndSet(false, true)) {
-            Log.i(tag, "analyzeThreat() skipped - already in progress.")
+            Log.i(tag, "processAiAnalysis() skipped - already in progress.")
             return
         }
 
-        Log.i(tag, "analyzeThreat() triggered. AI Ready: $isAiReady")
-        viewModelScope.launch(exceptionHandler) {
-            isAnalyzing = true
-            
-            try {
-                val wifiCount = networks.size
-                val bleCount = bluetoothDevices.size
-                val totalCount = wifiCount + bleCount
-                val currentThreatScore = threatScore
-                Log.d(tag, "Analyzing threat: $wifiCount WiFi, $bleCount BLE. Score: $currentThreatScore")
+        isAnalyzing = true
+        
+        try {
+            val wifiCount = networks.size
+            val bleCount = bluetoothDevices.size
+            val totalCount = wifiCount + bleCount
+            val currentThreatScore = threatScore
+            Log.d(tag, "Executing AI analysis on thread: ${Thread.currentThread().name}")
 
-                val environmentType = when {
-                    totalCount > 1500 -> "Ultra-Dense Urban / Electronic Saturation Zone"
-                    totalCount > 500  -> "Standard Congestion Zone"
-                    else              -> "Low-Noise / Isolated Perimeter"
-                }
-
-                val telemetryPayload = """
-                    Density Context: $environmentType
-                    Raw Environment Signals: $wifiCount Wi-Fi, $bleCount Bluetooth nodes.
-                    Active Countermeasures Status: Adaptive attenuation active. Persistent targets identified.
-                """.trimIndent()
-                
-                val agentInstance = tacticalAgent
-                if (agentInstance != null) {
-                    val agentClass = agentInstance.javaClass
-                    Log.d(tag, "Invoking AI agent: ${agentClass.simpleName}")
-                    
-                    val analyzeMethod = agentClass.getMethod(
-                        "generateActionAdvice", 
-                        Int::class.javaPrimitiveType, 
-                        String::class.java
-                    )
-                    
-                    Log.d(tag, "Method found, executing on IO thread...")
-                    val generatedBrief = withContext(Dispatchers.IO) {
-                        analyzeMethod.invoke(agentInstance, currentThreatScore, telemetryPayload) as String
-                    }
-                    
-                    Log.i(tag, "AI generation complete: ${generatedBrief.take(20)}...")
-                    aiAdviceText = generatedBrief
-                    aiResponse = generatedBrief
-                    
-                    strategicBrief = if (currentThreatScore > 70) {
-                        generatedBrief
-                    } else {
-                        null
-                    }
-                } else {
-                    Log.w(tag, "AI agent not initialized, skipping analysis.")
-                    aiAdviceText = "AI Engine Standby. Click to initialize."
-                    strategicBrief = null
-                }
-            } catch (t: Throwable) {
-                Log.e("CRASH_DEBUG", "AI analysis failed internally", t)
-                aiAdviceText = "Tactical generation suspended: Subsystem error."
-                strategicBrief = "Strategic analysis failed."
-            } finally {
-                isAnalyzing = false
-                analysisInProgress.set(false)
+            val environmentType = when {
+                totalCount > 1500 -> "Ultra-Dense Urban / Electronic Saturation Zone"
+                totalCount > 500  -> "Standard Congestion Zone"
+                else              -> "Low-Noise / Isolated Perimeter"
             }
+
+            val telemetryPayload = """
+                Density Context: $environmentType
+                Raw Environment Signals: $wifiCount Wi-Fi, $bleCount Bluetooth nodes.
+                Active Countermeasures Status: Adaptive attenuation active. Persistent targets identified.
+            """.trimIndent()
+            
+            val agentInstance = tacticalAgent
+            if (agentInstance != null) {
+                val agentClass = agentInstance.javaClass
+                val analyzeMethod = agentClass.getMethod(
+                    "generateActionAdvice", 
+                    Int::class.javaPrimitiveType, 
+                    String::class.java
+                )
+                
+                val generatedBrief = analyzeMethod.invoke(agentInstance, currentThreatScore, telemetryPayload) as String
+                
+                Log.i(tag, "AI generation complete: ${generatedBrief.take(20)}...")
+                aiAdviceText = generatedBrief
+                aiResponse = generatedBrief
+                strategicBrief = if (currentThreatScore > 70) generatedBrief else null
+            } else {
+                Log.w(tag, "AI agent not initialized, skipping analysis.")
+                aiAdviceText = "AI Engine Standby. Click to initialize."
+                strategicBrief = null
+            }
+        } catch (t: Throwable) {
+            Log.e("CRASH_DEBUG", "AI analysis failed internally", t)
+            aiAdviceText = "Tactical generation suspended: Subsystem error."
+            strategicBrief = "Strategic analysis failed."
+        } finally {
+            isAnalyzing = false
+            analysisInProgress.set(false)
         }
     }
 
@@ -691,6 +703,29 @@ class DashboardViewModel(
                 if (index != -1) {
                     bluetoothDevices[index] = bluetoothDevices[index].copy(notes = notes)
                 }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopAutoRefresh()
+        
+        // Execute teardown on the dedicated AI thread to maintain thread affinity
+        aiScope.launch {
+            try {
+                val agentInstance = tacticalAgent
+                if (agentInstance != null) {
+                    val agentClass = agentInstance.javaClass
+                    val closeMethod = agentClass.getMethod("close")
+                    closeMethod.invoke(agentInstance)
+                    tacticalAgent = null
+                }
+            } catch (e: Exception) {
+                Log.e(tag, "Error closing AI agent on cleared", e)
+            } finally {
+                // Shut down the dispatcher's underlying executor
+                aiDispatcher.close()
             }
         }
     }

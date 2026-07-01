@@ -74,12 +74,20 @@ class SecureActionAgent(private val context: Context, private val modelPath: Str
         """.trimIndent()
 
         return try {
-            synchronized(this) {
-                llmEngine?.generateResponse(prompt) ?: "Inference engine failed to respond."
-            }
+            llmEngine?.generateResponse(prompt) ?: "Inference engine failed to respond."
         } catch (e: Throwable) {
-            android.util.Log.e("SecureActionAgent", "Inference failed", e)
+            android.util.Log.e("SecureActionAgent", "Inference failed: ${e.message}", e)
             "Analysis failed: ${e.localizedMessage}"
+        }
+    }
+
+    fun close() {
+        try {
+            llmEngine?.close()
+            llmEngine = null
+            isReady = false
+        } catch (e: Exception) {
+            android.util.Log.e("SecureActionAgent", "Error closing engine", e)
         }
     }
 }
