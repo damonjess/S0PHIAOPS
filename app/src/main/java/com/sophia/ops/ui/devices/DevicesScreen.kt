@@ -305,11 +305,11 @@ fun DevicesContent(
                     showClearDialog = false
                 },
                 title = {
-                    Text("Delete all discovered Bluetooth devices?")
+                    Text("Delete all discovered devices?")
                 },
                 text = {
                     Text(
-                        "This cannot be undone."
+                        "This will remove all Wi-Fi and Bluetooth devices. This cannot be undone."
                     )
                 },
                 confirmButton = {
@@ -367,7 +367,7 @@ fun DeviceItem(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                    DeviceIcon(device.name)
+                    DeviceIcon(device.name, device.type)
                     Spacer(Modifier.width(12.dp))
                     Text(
                         text = device.name,

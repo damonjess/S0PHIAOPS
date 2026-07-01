@@ -40,6 +40,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.random.Random
 import kotlin.jvm.Volatile
@@ -123,6 +124,8 @@ class DashboardViewModel(
     var isAnalyzing by mutableStateOf(value = false)
         private set
 
+    private val analysisInProgress = AtomicBoolean(false)
+
     var strategicBrief by mutableStateOf<String?>(null)
         private set
 
@@ -179,7 +182,11 @@ class DashboardViewModel(
     }
 
     fun analyzeThreat() {
-        if (isAnalyzing) return
+        if (!analysisInProgress.compareAndSet(false, true)) {
+            Log.i(tag, "analyzeThreat() skipped - already in progress.")
+            return
+        }
+
         Log.i(tag, "analyzeThreat() triggered. AI Ready: $isAiReady")
         viewModelScope.launch(exceptionHandler) {
             isAnalyzing = true
@@ -239,6 +246,7 @@ class DashboardViewModel(
                 strategicBrief = "Strategic analysis failed."
             } finally {
                 isAnalyzing = false
+                analysisInProgress.set(false)
             }
         }
     }

@@ -27,4 +27,7 @@ interface WifiDao {
 
     @Query("SELECT COUNT(*) FROM wifi_networks")
     fun getCount(): Flow<Int>
+
+    @Query("DELETE FROM wifi_networks")
+    suspend fun deleteAllNetworks()
 }

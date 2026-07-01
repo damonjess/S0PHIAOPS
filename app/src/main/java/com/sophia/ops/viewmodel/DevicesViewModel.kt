@@ -59,6 +59,7 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
     fun clearDevices() {
         viewModelScope.launch {
             bluetoothDao.deleteAllDevices()
+            wifiDao.deleteAllNetworks()
         }
     }
 

@@ -8,10 +8,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.sophia.ops.model.DeviceType
 
 @Composable
 fun DeviceIcon(
     name: String?,
+    type: DeviceType,
     modifier: Modifier = Modifier
 ) {
     val icon = when {
@@ -45,6 +47,9 @@ fun DeviceIcon(
 
         name?.contains("duoek", true) == true ->
             Icons.Default.MonitorHeart
+
+        type == DeviceType.WIFI ->
+            Icons.Default.Wifi
 
         else ->
             Icons.Default.Bluetooth
