@@ -66,7 +66,13 @@ class DashboardViewModel(
     
     // Channel for debouncing AI requests. CONFLATED ensures we only process the LATEST
     // request if multiple scans finish while the AI is busy.
-    private val aiRequestChannel = Channel<Unit>(Channel.CONFLATED)
+    private val aiRequestChannel = Channel<ScanDataSnapshot>(Channel.CONFLATED)
+
+    private data class ScanDataSnapshot(
+        val networks: List<WifiNetwork>,
+        val bluetoothDevices: List<BluetoothDeviceEntity>,
+        val threatScore: Int
+    )
     
     private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
         Log.e("CRASH_DEBUG", "Uncaught Exception in ViewModel scope", throwable)
@@ -89,8 +95,8 @@ class DashboardViewModel(
 
     private fun startAiRequestObserver() {
         aiScope.launch(exceptionHandler) {
-            for (request in aiRequestChannel) {
-                processAiAnalysis()
+            for (snapshot in aiRequestChannel) {
+                processAiAnalysis(snapshot)
             }
         }
     }
@@ -159,16 +165,20 @@ class DashboardViewModel(
         if (tacticalAgent != null) return 
         
         aiScope.launch(exceptionHandler) {
-            isAiLoading = true
-            aiInitializationFailed = false
+            withContext(Dispatchers.Main) {
+                isAiLoading = true
+                aiInitializationFailed = false
+            }
             
             val targetPath = "/data/local/tmp/gemma-2b-it-cpu.bin"
             
             val fileExists = File(targetPath).exists()
             if (!fileExists) {
-                aiInitializationFailed = true
-                aiAdviceText = "AI weights file missing at: $targetPath"
-                isAiLoading = false
+                withContext(Dispatchers.Main) {
+                    aiInitializationFailed = true
+                    aiAdviceText = "AI weights file missing at: $targetPath"
+                    isAiLoading = false
+                }
                 return@launch
             }
 
@@ -181,44 +191,57 @@ class DashboardViewModel(
                 val initMethod = agentClass.getMethod("initializeEngine")
                 val result = initMethod.invoke(instance) as Boolean
                 
-                if (result) {
-                    Log.i(tag, "SecureActionAgent initialized successfully.")
-                    tacticalAgent = instance
-                    aiInitializationFailed = false
-                    aiAdviceText = "SOPHIA AI Engine Online. Awaiting threat metrics..."
-                } else {
-                    Log.e(tag, "SecureActionAgent reports failure during initialization.")
-                    aiInitializationFailed = true
-                    aiAdviceText = "AI Failed to initialize (check weights or logcat)"
+                withContext(Dispatchers.Main) {
+                    if (result) {
+                        Log.i(tag, "SecureActionAgent initialized successfully.")
+                        tacticalAgent = instance
+                        aiInitializationFailed = false
+                        aiAdviceText = "SOPHIA AI Engine Online. Awaiting threat metrics..."
+                    } else {
+                        Log.e(tag, "SecureActionAgent reports failure during initialization.")
+                        aiInitializationFailed = true
+                        aiAdviceText = "AI Failed to initialize (check weights or logcat)"
+                    }
+                    isAiLoading = false
                 }
-                isAiLoading = false
             } catch (t: Throwable) {
                 Log.e(tag, "Reflection-based AI initialization failed", t)
-                aiInitializationFailed = true
-                aiAdviceText = "AI Subsystem Error: ${t.localizedMessage}"
-                isAiLoading = false
+                withContext(Dispatchers.Main) {
+                    aiInitializationFailed = true
+                    aiAdviceText = "AI Subsystem Error: ${t.localizedMessage}"
+                    isAiLoading = false
+                }
             }
         }
     }
 
     fun analyzeThreat() {
         Log.i(tag, "analyzeThreat() requested. AI Ready: $isAiReady")
-        aiRequestChannel.trySend(Unit)
+        
+        // Take a snapshot of current scan data on the Main thread to ensure consistency
+        viewModelScope.launch {
+            val snapshot = ScanDataSnapshot(
+                networks = networks.toList(),
+                bluetoothDevices = bluetoothDevices.toList(),
+                threatScore = threatScore
+            )
+            aiRequestChannel.trySend(snapshot)
+        }
     }
 
-    private fun processAiAnalysis() {
+    private suspend fun processAiAnalysis(snapshot: ScanDataSnapshot) {
         if (!analysisInProgress.compareAndSet(false, true)) {
             Log.i(tag, "processAiAnalysis() skipped - already in progress.")
             return
         }
 
-        isAnalyzing = true
+        withContext(Dispatchers.Main) { isAnalyzing = true }
         
         try {
-            val wifiCount = networks.size
-            val bleCount = bluetoothDevices.size
+            val wifiCount = snapshot.networks.size
+            val bleCount = snapshot.bluetoothDevices.size
             val totalCount = wifiCount + bleCount
-            val currentThreatScore = threatScore
+            val currentThreatScore = snapshot.threatScore
             Log.d(tag, "Executing AI analysis on thread: ${Thread.currentThread().name}")
 
             val environmentType = when {
@@ -245,20 +268,26 @@ class DashboardViewModel(
                 val generatedBrief = analyzeMethod.invoke(agentInstance, currentThreatScore, telemetryPayload) as String
                 
                 Log.i(tag, "AI generation complete: ${generatedBrief.take(20)}...")
-                aiAdviceText = generatedBrief
-                aiResponse = generatedBrief
-                strategicBrief = if (currentThreatScore > 70) generatedBrief else null
+                withContext(Dispatchers.Main) {
+                    aiAdviceText = generatedBrief
+                    aiResponse = generatedBrief
+                    strategicBrief = if (currentThreatScore > 70) generatedBrief else null
+                }
             } else {
                 Log.w(tag, "AI agent not initialized, skipping analysis.")
-                aiAdviceText = "AI Engine Standby. Click to initialize."
-                strategicBrief = null
+                withContext(Dispatchers.Main) {
+                    aiAdviceText = "AI Engine Standby. Click to initialize."
+                    strategicBrief = null
+                }
             }
         } catch (t: Throwable) {
             Log.e("CRASH_DEBUG", "AI analysis failed internally", t)
-            aiAdviceText = "Tactical generation suspended: Subsystem error."
-            strategicBrief = "Strategic analysis failed."
+            withContext(Dispatchers.Main) {
+                aiAdviceText = "Tactical generation suspended: Subsystem error."
+                strategicBrief = "Strategic analysis failed."
+            }
         } finally {
-            isAnalyzing = false
+            withContext(Dispatchers.Main) { isAnalyzing = false }
             analysisInProgress.set(false)
         }
     }
@@ -441,8 +470,9 @@ class DashboardViewModel(
 
     fun scan() {
         val now = System.currentTimeMillis()
-        if (isScanning || ((now - lastScanRequestTime) < minScanInterval)) {
-            Log.i(tag, "Scan skipped (in progress or cooldown).")
+        // Added AI checks to prevent concurrent pressure during analysis
+        if (isScanning || isAnalyzing || isAiLoading || ((now - lastScanRequestTime) < minScanInterval)) {
+            Log.i(tag, "Scan skipped (in progress, AI active, or cooldown).")
             fuzzExistingSignals()
             return
         }
@@ -468,7 +498,7 @@ class DashboardViewModel(
                         val timestampNow = System.currentTimeMillis()
 
                         if (existing?.ignored == true) {
-                            androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
+                            withContext(Dispatchers.Main) {
                                 val uiIndex = bluetoothDevices.indexOfFirst { it.address == device.address }
                                 if (uiIndex != -1) {
                                     bluetoothDevices.removeAt(uiIndex)
@@ -520,8 +550,8 @@ class DashboardViewModel(
                             updatedEntity
                         }
 
-                        // FIX: Safely mutate Compose state tracking atomically 
-                        androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
+                        // FIX: Ensure all Compose state mutations happen on the Main thread
+                        withContext(Dispatchers.Main) {
                             val currentList = bluetoothDevices
                             val uiIndex = currentList.indexOfFirst { it.address == device.address }
                             if (uiIndex != -1) {
@@ -543,16 +573,16 @@ class DashboardViewModel(
                 }
             },
             onDiscoveryFinished = {
-                isBluetoothScanning = false
-                isScanning = isWifiScanning || isBluetoothScanning
-                Log.i(tag, "Bluetooth discovery finished.")
+                viewModelScope.launch {
+                    isBluetoothScanning = false
+                    isScanning = isWifiScanning || isBluetoothScanning
+                    Log.i(tag, "Bluetooth discovery finished.")
+                }
             }
         )
         
         scanner.startScan { results ->
             Log.i(tag, "Callback: Received ${results.size} results.")
-            isThrottled = false 
-            lastScanWasLive = true
             
             val updatedList = results.mapNotNull {
                 val risk = RiskEngine.calculate(it.capabilities, it.level)
@@ -569,22 +599,26 @@ class DashboardViewModel(
                 )
             }
 
-            androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
+            viewModelScope.launch {
+                isThrottled = false 
+                lastScanWasLive = true
                 networks.clear()
                 networks.addAll(updatedList)
-            }
-
-            // FIX: Explicitly run database updates on Dispatchers.IO
-            viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
-                try {
-                    wifiDao.insertAll(updatedList)
-                    saveScanSession()
-                    analyzeThreat()
-                } catch (e: Exception) {
-                    Log.e(tag, "Failed to persist WiFi networks", e)
-                } finally {
-                    isWifiScanning = false
-                    isScanning = isWifiScanning || isBluetoothScanning
+                
+                // Explicitly run database updates on Dispatchers.IO
+                withContext(Dispatchers.IO) {
+                    try {
+                        wifiDao.insertAll(updatedList)
+                        saveScanSession()
+                        analyzeThreat()
+                    } catch (e: Exception) {
+                        Log.e(tag, "Failed to persist WiFi networks", e)
+                    } finally {
+                        withContext(Dispatchers.Main) {
+                            isWifiScanning = false
+                            isScanning = isWifiScanning || isBluetoothScanning
+                        }
+                    }
                 }
             }
         }
@@ -592,9 +626,9 @@ class DashboardViewModel(
 
     private suspend fun saveScanSession() {
         try {
-            val wifiCount = networks.size
-            val bleCount = bluetoothDevices.size
-            val currentThreat = threatScore
+            val (wifiCount, bleCount, currentThreat) = withContext(Dispatchers.Main) {
+                Triple(networks.size, bluetoothDevices.size, threatScore)
+            }
             
             val session = ScanSession(
                 timestamp = System.currentTimeMillis(),
@@ -602,7 +636,9 @@ class DashboardViewModel(
                 bluetoothCount = bleCount,
                 threatScore = currentThreat
             )
-            scanDao.insert(session)
+            withContext(Dispatchers.IO) {
+                scanDao.insert(session)
+            }
         } catch (e: Exception) {
             Log.e(tag, "Failed to save scan session", e)
         }
@@ -610,11 +646,12 @@ class DashboardViewModel(
 
     private fun fuzzExistingSignals() {
         if (networks.isEmpty()) return
-        isThrottled = true 
-        lastScanWasLive = false
         
-        Log.d(tag, "Applying aggressive signal fuzz to keep radar alive.")
-        androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
+        viewModelScope.launch {
+            isThrottled = true 
+            lastScanWasLive = false
+            
+            Log.d(tag, "Applying aggressive signal fuzz to keep radar alive.")
             val currentList = networks
             for (i in currentList.indices) {
                 val net = currentList[i]
@@ -627,9 +664,7 @@ class DashboardViewModel(
                     timestamp = System.currentTimeMillis() 
                 )
             }
-        }
-        
-        viewModelScope.launch(exceptionHandler) {
+
             delay(1000.milliseconds)
             isThrottled = false
         }
