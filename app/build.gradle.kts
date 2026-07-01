@@ -1,3 +1,7 @@
+# TODO(RepoScanner): [WARNING] build: Gradle BUILD FAILED (took 5s) — Fix: See the compiler errors above this line for the root cause
+# TODO(RepoScanner): [WARNING] build: Build process exited with code 1 — see specific errors above — Fix: Review the specific error lines higher in the CI log
+# TODO(RepoScanner): [WARNING] build: Gradle BUILD FAILED (took 4s) — Fix: See the compiler errors above this line for the root cause
+# TODO(RepoScanner): [WARNING] build: Gradle task failed: :app:compileDebugUnitTestKotlin — Fix: Check the Kotlin/Java compiler errors listed above this line in the build log
 plugins {
     alias(libs.plugins.android.application)
     id("org.jetbrains.kotlin.plugin.compose")
