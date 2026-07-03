@@ -3,7 +3,6 @@ package com.sophia.ops.ai
 import android.content.Context
 import android.util.Log
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
-import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import java.io.File
 
 class SecureActionAgent(
@@ -30,7 +29,7 @@ class SecureActionAgent(
 
             val inferenceOptions = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(modelPath)
-                .setMaxTokens(128)
+                .setMaxTokens(512)
                 .build()
 
             llmInference = LlmInference.createFromOptions(context, inferenceOptions)
@@ -58,20 +57,9 @@ Do not use lists, labels, or extra explanation.<end_of_turn>
 <start_of_turn>model
 """.trimIndent()
 
-        var session: LlmInferenceSession? = null
-
         return try {
-            Log.d(tag, "Creating session...")
-            session = LlmInferenceSession.createFromOptions(
-                inference,
-                LlmInferenceSession.LlmInferenceSessionOptions.builder().build()
-            )
-
-            Log.d(tag, "Adding query chunk...")
-            session.addQueryChunk(prompt)
-            
-            Log.d(tag, "Generating response...")
-            val raw = session.generateResponse()
+            Log.d(tag, "Generating response directly...")
+            val raw = inference.generateResponse(prompt)
             Log.d(tag, "Response received: length=${raw.length}")
             
             if (raw.isBlank()) {
@@ -82,12 +70,6 @@ Do not use lists, labels, or extra explanation.<end_of_turn>
         } catch (t: Throwable) {
             Log.e(tag, "Inference failed", t)
             "Strategic analysis suspended: ${t.localizedMessage ?: t.javaClass.simpleName}"
-        } finally {
-            try {
-                session?.close()
-            } catch (closeError: Throwable) {
-                Log.e(tag, "Error closing inference session", closeError)
-            }
         }
     }
 
@@ -105,34 +87,32 @@ Do not use lists, labels, or extra explanation.<end_of_turn>
 
         val prompt = """
 <start_of_turn>user
-Analyze this network device for potential security risks:
-Name: $name
-Address: $address
-Vendor: ${vendor ?: "Unknown"}
-Type: $type
-Signal: ${signal}dBm
-Times Seen: $timesSeen
-Internal Risk Score: $riskScore/100
+Identify this device:
+NAME: $name
+MAC: $address
+VENDOR: ${vendor ?: "Unknown"}
+TYPE: $type
 
-If the Vendor is 'Unknown' or 'Private', use the MAC address and Name to deduce the likely manufacturer or device category (e.g., IoT, Smartphone, Wearable). 
-Provide a 1-sentence tactical assessment of the device identity and trust level.<end_of_turn>
+If VENDOR is "Private Address", explain it is a modern smartphone privacy feature. Otherwise, analyze the name and MAC to guess the manufacturer. State if it is likely "Friendly" or "Suspicious". 
+Provide exactly 2 sentences. Do not repeat these instructions.<end_of_turn>
 <start_of_turn>model
 """.trimIndent()
 
-        var session: LlmInferenceSession? = null
         return try {
-            session = LlmInferenceSession.createFromOptions(
-                inference,
-                LlmInferenceSession.LlmInferenceSessionOptions.builder().build()
-            )
-            session.addQueryChunk(prompt)
-            val raw = session.generateResponse()
-            normalizeResponse(raw)
+            val raw = inference.generateResponse(prompt)
+            cleanAiResponse(raw)
         } catch (t: Throwable) {
-            "Analysis failed: ${t.localizedMessage}"
-        } finally {
-            session?.close()
+            Log.e(tag, "Device analysis failed", t)
+            "Analysis failed: ${t.localizedMessage ?: t.javaClass.simpleName}"
         }
+    }
+
+    private fun cleanAiResponse(text: String): String {
+        return text.replace(Regex("\\*\\*"), "") // Remove bold markers
+            .replace(Regex("\\\\n"), " ")       // Remove literal \n strings
+            .replace(Regex("\\n"), " ")         // Remove actual newlines
+            .replace(Regex("\\s+"), " ")        // Collapse whitespace
+            .trim()
     }
 
     fun close() {
@@ -147,7 +127,7 @@ Provide a 1-sentence tactical assessment of the device identity and trust level.
     }
 
     private fun normalizeResponse(text: String): String {
-        return text.replace(Regex("\\s+"), " ").trim()
+        return cleanAiResponse(text)
     }
 
     private fun limitToTwoSentences(text: String): String {

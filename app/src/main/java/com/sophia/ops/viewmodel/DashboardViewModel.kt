@@ -404,7 +404,7 @@ class DashboardViewModel(
         }
     }
 
-    private fun hasEnoughMemoryForAi(minAvailableMb: Long = 2048): Boolean {
+    private fun hasEnoughMemoryForAi(minAvailableMb: Long = 1024): Boolean {
         val am = getApplication<Application>()
             .getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val info = ActivityManager.MemoryInfo()
@@ -433,6 +433,11 @@ class DashboardViewModel(
     fun performDeepScan(device: NetworkDevice) {
         if (!isAiReady) return
         
+        if (!hasEnoughMemoryForAi()) {
+            deepScanResult = "Deep Scan aborted: Insufficient device memory."
+            return
+        }
+
         aiScope.launch(exceptionHandler) {
             withContext(Dispatchers.Main) {
                 isDeepScanning = true
@@ -441,19 +446,27 @@ class DashboardViewModel(
             
             val agent = tacticalAgent
             if (agent != null) {
-                val result = agent.analyzeDevice(
-                    name = device.name,
-                    address = device.address,
-                    vendor = device.vendor,
-                    type = device.type.name,
-                    signal = device.signal,
-                    timesSeen = device.timesSeen,
-                    riskScore = device.riskScore
-                )
-                
-                withContext(Dispatchers.Main) {
-                    deepScanResult = result
-                    isDeepScanning = false
+                try {
+                    val result = agent.analyzeDevice(
+                        name = device.name,
+                        address = device.address,
+                        vendor = device.vendor,
+                        type = device.type.name,
+                        signal = device.signal,
+                        timesSeen = device.timesSeen,
+                        riskScore = device.riskScore.toInt()
+                    )
+                    
+                    withContext(Dispatchers.Main) {
+                        deepScanResult = result
+                        isDeepScanning = false
+                    }
+                } catch (e: Throwable) {
+                    Log.e(tag, "Deep scan failed", e)
+                    withContext(Dispatchers.Main) {
+                        deepScanResult = "Deep scan failed: ${e.localizedMessage ?: e.javaClass.simpleName}"
+                        isDeepScanning = false
+                    }
                 }
             } else {
                 withContext(Dispatchers.Main) {
