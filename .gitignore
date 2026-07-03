@@ -13,3 +13,15 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# AI Models and Environments
+/litert-torch/
+/qwen-0.5b/
+/smollm2-135m/
+/hf-gemma3-270m/
+/hf/
+/mediapipe/
+
+# Virtual Environments
+/venv/
+/.venv/
