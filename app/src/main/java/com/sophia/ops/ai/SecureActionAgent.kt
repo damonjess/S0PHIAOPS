@@ -114,7 +114,8 @@ Signal: ${signal}dBm
 Times Seen: $timesSeen
 Internal Risk Score: $riskScore/100
 
-Provide a 1-sentence tactical assessment of what this device likely is and if it should be trusted.<end_of_turn>
+If the Vendor is 'Unknown' or 'Private', use the MAC address and Name to deduce the likely manufacturer or device category (e.g., IoT, Smartphone, Wearable). 
+Provide a 1-sentence tactical assessment of the device identity and trust level.<end_of_turn>
 <start_of_turn>model
 """.trimIndent()
 
