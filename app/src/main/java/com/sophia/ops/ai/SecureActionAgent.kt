@@ -1,93 +1,113 @@
 package com.sophia.ops.ai
 
 import android.content.Context
+import android.util.Log
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import java.io.File
-import kotlin.jvm.Volatile
 
-class SecureActionAgent(private val context: Context, private val modelPath: String) {
+class SecureActionAgent(
+    private val context: Context,
+    private val modelPath: String,
+) {
+    private val tag = "SecureActionAgent"
 
-    @Volatile
-    private var llmEngine: LlmInference? = null
-    
-    // Status flag to report back to your ViewModels safely
-    var isReady = false
-        private set
+    private var llmInference: LlmInference? = null
+    private var llmSession: LlmInferenceSession? = null
+    private var isReady = false
 
-    /**
-     * Shifts the heavy weight-loading disk operations off the Main UI Thread.
-     * Returns true if initialized correctly, or false if the file is missing or corrupted.
-     * 
-     * NOTE: This is now a standard function to support dynamic reflection-based loading.
-     * Ensure this is called from a background thread (e.g. Dispatchers.IO).
-     */
     fun initializeEngine(): Boolean {
-        val modelFile = File(modelPath)
-        if (!modelFile.exists()) {
-            android.util.Log.e("SecureActionAgent", "Model file does not exist at $modelPath")
-            isReady = false
-            return false
-        }
-        
-        if (!modelFile.canRead()) {
-            android.util.Log.e("SecureActionAgent", "Model file exists but is NOT READABLE at $modelPath. Check permissions.")
-            isReady = false
-            return false
-        }
+        if (isReady && llmInference != null && llmSession != null) return true
 
         return try {
-            val options = LlmInference.LlmInferenceOptions.builder()
+            val modelFile = File(modelPath)
+            Log.i(tag, "Model path: $modelPath")
+            Log.i(tag, "Exists: ${modelFile.exists()} size=${modelFile.length()}")
+
+            if (!modelFile.exists()) {
+                isReady = false
+                return false
+            }
+
+            val inferenceOptions = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(modelPath)
-                .setMaxTokens(90)
-                .setTemperature(0.2f)
+                .setMaxTokens(64)
                 .build()
-            
-            // This blocking operational layer now executes entirely on the caller's thread
-            llmEngine = LlmInference.createFromOptions(context, options)
+
+            llmInference = LlmInference.createFromOptions(context, inferenceOptions)
+
+            val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
+                .build()
+
+            llmSession = LlmInferenceSession.createFromOptions(
+                llmInference!!,
+                sessionOptions
+            )
+
             isReady = true
-            android.util.Log.i("SecureActionAgent", "AI Engine initialized successfully")
             true
-        } catch (e: Throwable) {
-            android.util.Log.e("SecureActionAgent", "Failed to initialize AI Engine: ${e.message}", e)
+        } catch (t: Throwable) {
+            Log.e(tag, "Init failed", t)
             isReady = false
+            llmSession = null
+            llmInference = null
             false
         }
     }
 
-    /**
-     * Executes AI inference. Ensure this is called from a background thread.
-     */
     fun generateActionAdvice(threatScore: Int, activeDevices: String): String {
-        if (!isReady || llmEngine == null) {
-            return "SOPHIA AI Engine Offline: Missing or uninitialized model file weights."
-        }
-
-        val prompt = """
-            You are SOPHIA OPS Cyber-Defense Tactical AI. System Parameters:
-            - Threat Vector Level: $threatScore%
-            - Environment Scan Snapshot: $activeDevices
-            
-            Provide a strict, maximum two-sentence action-oriented operational recommendation to protect the user's network perimeter. 
-            Do not use greetings or introductions. Be direct.
-        """.trimIndent()
+        val session = llmSession
+            ?: return "Tactical AI Unavailable: Core initialization pending or failed."
 
         return try {
-            llmEngine?.generateResponse(prompt) ?: "Inference engine failed to respond."
-        } catch (e: Throwable) {
-            android.util.Log.e("SecureActionAgent", "Inference failed: ${e.message}", e)
-            "Analysis failed: ${e.localizedMessage}"
+            val prompt = """
+Threat level: $threatScore
+Environment: $activeDevices
+
+Provide exactly 2 short sentences of tactical network defense advice.
+Do not use lists, labels, or extra explanation.
+""".trimIndent()
+
+            session.addQueryChunk(prompt)
+            val raw = session.generateResponse()
+            limitToTwoSentences(normalizeResponse(raw))
+        } catch (t: Throwable) {
+            Log.e(tag, "Inference failed", t)
+            "Strategic analysis suspended: Maintain current defensive posture and monitor logs."
         }
     }
 
     fun close() {
         try {
-            llmEngine?.close()
-            llmEngine = null
-            isReady = false
-        } catch (e: Exception) {
-            android.util.Log.e("SecureActionAgent", "Error closing engine", e)
+            llmSession?.close()
+        } catch (t: Throwable) {
+            Log.e(tag, "Error closing session", t)
+        }
+
+        try {
+            llmInference?.close()
+        } catch (t: Throwable) {
+            Log.e(tag, "Error closing inference", t)
+        }
+
+        llmSession = null
+        llmInference = null
+        isReady = false
+    }
+
+    private fun normalizeResponse(text: String): String {
+        return text.replace(Regex("\\s+"), " ").trim()
+    }
+
+    private fun limitToTwoSentences(text: String): String {
+        val parts = Regex("(?<=[.!?])\\s+")
+            .split(text)
+            .filter { it.isNotBlank() }
+
+        return when {
+            parts.isEmpty() -> "Strategic analysis suspended: Maintain current defensive posture and monitor logs."
+            parts.size == 1 -> parts[0]
+            else -> parts.take(2).joinToString(" ")
         }
     }
 }

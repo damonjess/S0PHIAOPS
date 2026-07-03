@@ -1,6 +1,7 @@
 package com.sophia.ops.viewmodel
 
 import android.app.Application
+import android.app.ActivityManager
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.Context
@@ -21,6 +22,7 @@ import com.sophia.ops.wifi.RiskEngine
 import com.sophia.ops.wifi.WifiScanner
 import com.sophia.ops.model.NetworkDevice
 import com.sophia.ops.model.DeviceType
+import com.sophia.ops.ai.SecureActionAgent
 import android.util.Log
 import android.annotation.SuppressLint
 import androidx.lifecycle.viewModelScope
@@ -66,7 +68,7 @@ class DashboardViewModel(
     
     // Channel for debouncing AI requests. CONFLATED ensures we only process the LATEST
     // request if multiple scans finish while the AI is busy.
-    private val aiRequestChannel = Channel<ScanDataSnapshot>(Channel.CONFLATED)
+    private val aiRequestChannel = Channel<Unit>(Channel.CONFLATED)
 
     private data class ScanDataSnapshot(
         val networks: List<WifiNetwork>,
@@ -95,8 +97,13 @@ class DashboardViewModel(
 
     private fun startAiRequestObserver() {
         aiScope.launch(exceptionHandler) {
-            for (snapshot in aiRequestChannel) {
-                processAiAnalysis(snapshot)
+            while (isActive) {
+                try {
+                    aiRequestChannel.receive()
+                    processAiAnalysis()
+                } catch (e: Exception) {
+                    if (isActive) Log.e(tag, "AI observer error", e)
+                }
             }
         }
     }
@@ -140,7 +147,7 @@ class DashboardViewModel(
         private set
 
     @Volatile
-    private var tacticalAgent: Any? = null 
+    private var tacticalAgent: SecureActionAgent? = null 
 
     val isAiReady: Boolean
         get() = tacticalAgent != null
@@ -170,32 +177,31 @@ class DashboardViewModel(
                 isAiLoading = true
                 aiInitializationFailed = false
             }
+
+            val candidateModelPaths = listOf(
+                "${getApplication<Application>().filesDir}/model.task",
+                "/data/local/tmp/llm/model.task"
+            )
             
-            val targetPath = "/data/local/tmp/gemma-2b-it-cpu.bin"
+            val targetPath = candidateModelPaths.find { File(it).exists() }
             
-            val fileExists = File(targetPath).exists()
-            if (!fileExists) {
+            if (targetPath == null) {
                 withContext(Dispatchers.Main) {
                     aiInitializationFailed = true
-                    aiAdviceText = "AI weights file missing at: $targetPath"
+                    aiAdviceText = "AI weights file missing. Checked: ${candidateModelPaths.joinToString()}"
                     isAiLoading = false
                 }
                 return@launch
             }
 
             try {
-                Log.d(tag, "Attempting to load SecureActionAgent via reflection on thread: ${Thread.currentThread().name}")
-                val agentClass = Class.forName("com.sophia.ops.ai.SecureActionAgent")
-                val constructor = agentClass.getConstructor(Context::class.java, String::class.java)
-                val instance = constructor.newInstance(getApplication(), targetPath)
-                
-                val initMethod = agentClass.getMethod("initializeEngine")
-                val result = initMethod.invoke(instance) as Boolean
+                val agent = SecureActionAgent(getApplication(), targetPath)
+                val result = agent.initializeEngine()
                 
                 withContext(Dispatchers.Main) {
                     if (result) {
                         Log.i(tag, "SecureActionAgent initialized successfully.")
-                        tacticalAgent = instance
+                        tacticalAgent = agent
                         aiInitializationFailed = false
                         aiAdviceText = "SOPHIA AI Engine Online. Awaiting threat metrics..."
                     } else {
@@ -206,7 +212,7 @@ class DashboardViewModel(
                     isAiLoading = false
                 }
             } catch (t: Throwable) {
-                Log.e(tag, "Reflection-based AI initialization failed", t)
+                Log.e(tag, "AI initialization failed", t)
                 withContext(Dispatchers.Main) {
                     aiInitializationFailed = true
                     aiAdviceText = "AI Subsystem Error: ${t.localizedMessage}"
@@ -218,19 +224,25 @@ class DashboardViewModel(
 
     fun analyzeThreat() {
         Log.i(tag, "analyzeThreat() requested. AI Ready: $isAiReady")
-        
-        // Take a snapshot of current scan data on the Main thread to ensure consistency
-        viewModelScope.launch {
-            val snapshot = ScanDataSnapshot(
-                networks = networks.toList(),
-                bluetoothDevices = bluetoothDevices.toList(),
-                threatScore = threatScore
-            )
-            aiRequestChannel.trySend(snapshot)
+
+        if (!isAiReady) {
+            aiAdviceText = "AI Engine Standby. Click to initialize."
+            aiResponse = null
+            strategicBrief = null
+            return
         }
+
+        if (!hasEnoughMemoryForAi()) {
+            aiAdviceText = "AI unavailable: not enough free memory for on-device analysis."
+            aiResponse = aiAdviceText
+            strategicBrief = null
+            return
+        }
+
+        aiRequestChannel.trySend(Unit)
     }
 
-    private suspend fun processAiAnalysis(snapshot: ScanDataSnapshot) {
+    private suspend fun processAiAnalysis() {
         if (!analysisInProgress.compareAndSet(false, true)) {
             Log.i(tag, "processAiAnalysis() skipped - already in progress.")
             return
@@ -239,24 +251,24 @@ class DashboardViewModel(
         withContext(Dispatchers.Main) { isAnalyzing = true }
         
         try {
-            val availableMb = getAvailableMemory()
-            Log.i(tag, "Memory check: ${availableMb}MB available.")
-            
-            if (availableMb < 600) {
+            if (!hasEnoughMemoryForAi()) {
                 withContext(Dispatchers.Main) {
-                    aiAdviceText = "AI Offline: Low Memory (${availableMb}MB)"
-                    aiResponse = "Insufficient RAM for Gemma-2B (${availableMb}MB). AI analysis disabled to prevent crash."
+                    aiAdviceText = "AI unavailable: not enough free memory for on-device analysis."
+                    aiResponse = aiAdviceText
+                    strategicBrief = null
                     isAnalyzing = false
                 }
                 analysisInProgress.set(false)
                 return
             }
 
-            // Prevent concurrent system pressure by suspending auto-refresh
-            val wasRefreshing = autoRefreshJob != null
-            if (wasRefreshing) {
-                Log.d(tag, "Suspending auto-refresh for AI task.")
-                stopAutoRefresh()
+            // Take a snapshot of current scan data on the Main thread to ensure consistency
+            val snapshot = withContext(Dispatchers.Main) {
+                ScanDataSnapshot(
+                    networks = networks.toList(),
+                    bluetoothDevices = bluetoothDevices.toList(),
+                    threatScore = threatScore
+                )
             }
 
             val wifiCount = snapshot.networks.size
@@ -279,14 +291,8 @@ class DashboardViewModel(
             
             val agentInstance = tacticalAgent
             if (agentInstance != null) {
-                val agentClass = agentInstance.javaClass
-                val analyzeMethod = agentClass.getMethod(
-                    "generateActionAdvice", 
-                    Int::class.javaPrimitiveType, 
-                    String::class.java
-                )
-                
-                val generatedBrief = analyzeMethod.invoke(agentInstance, currentThreatScore, telemetryPayload) as String
+                Log.d(tag, "Invoking generateActionAdvice directly...")
+                val generatedBrief = agentInstance.generateActionAdvice(currentThreatScore, telemetryPayload)
                 
                 Log.i(tag, "AI generation complete: ${generatedBrief.take(20)}...")
                 withContext(Dispatchers.Main) {
@@ -301,12 +307,6 @@ class DashboardViewModel(
                     strategicBrief = null
                 }
             }
-
-            // Restore auto-refresh if it was active
-            if (wasRefreshing) {
-                Log.d(tag, "Resuming auto-refresh after AI task.")
-                startAutoRefresh(lastAutoRefreshInterval)
-            }
         } catch (t: Throwable) {
             Log.e("CRASH_DEBUG", "AI analysis failed internally", t)
             withContext(Dispatchers.Main) {
@@ -319,11 +319,14 @@ class DashboardViewModel(
         }
     }
 
-    private fun getAvailableMemory(): Long {
-        val activityManager = getApplication<Application>().getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-        val memoryInfo = android.app.ActivityManager.MemoryInfo()
-        activityManager.getMemoryInfo(memoryInfo)
-        return memoryInfo.availMem / (1024 * 1024)
+    private fun hasEnoughMemoryForAi(minAvailableMb: Long = 2048): Boolean {
+        val am = getApplication<Application>()
+            .getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val info = ActivityManager.MemoryInfo()
+        am.getMemoryInfo(info)
+        val availableMb = info.availMem / (1024 * 1024)
+        Log.i(tag, "AI memory check: ${availableMb}MB available, lowMemory=${info.lowMemory}")
+        return !info.lowMemory && availableMb >= minAvailableMb
     }
 
     fun selectDevice(device: NetworkDevice?) {
@@ -505,9 +508,8 @@ class DashboardViewModel(
 
     fun scan() {
         val now = System.currentTimeMillis()
-        // Added AI checks to prevent concurrent pressure during analysis
-        if (isScanning || isAnalyzing || isAiLoading || ((now - lastScanRequestTime) < minScanInterval)) {
-            Log.i(tag, "Scan skipped (in progress, AI active, or cooldown).")
+        if (isScanning || ((now - lastScanRequestTime) < minScanInterval)) {
+            Log.i(tag, "Scan skipped (in progress or cooldown).")
             fuzzExistingSignals()
             return
         }
@@ -645,8 +647,6 @@ class DashboardViewModel(
                     try {
                         wifiDao.insertAll(updatedList)
                         saveScanSession()
-                        // Automatic AI analysis removed to prevent native crashes on low-RAM devices
-                        // analyzeThreat()
                     } catch (e: Exception) {
                         Log.e(tag, "Failed to persist WiFi networks", e)
                     } finally {
@@ -785,11 +785,8 @@ class DashboardViewModel(
         // Execute teardown on the dedicated AI thread to maintain thread affinity
         aiScope.launch {
             try {
-                val agentInstance = tacticalAgent
-                if (agentInstance != null) {
-                    val agentClass = agentInstance.javaClass
-                    val closeMethod = agentClass.getMethod("close")
-                    closeMethod.invoke(agentInstance)
+                tacticalAgent?.let {
+                    it.close()
                     tacticalAgent = null
                 }
             } catch (e: Exception) {

@@ -61,5 +61,5 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 
     // On-device LLM inference for local text generation
-    implementation("com.google.mediapipe:tasks-genai:0.10.14")
+    implementation("com.google.mediapipe:tasks-genai:0.10.35")
 }
