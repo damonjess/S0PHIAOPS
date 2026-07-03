@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import java.io.File
+import kotlin.jvm.Volatile
 
 class SecureActionAgent(
     private val context: Context,
@@ -11,21 +12,18 @@ class SecureActionAgent(
 ) {
     private val tag = "SecureActionAgent"
 
+    @Volatile
     private var llmInference: LlmInference? = null
-    private var isReady = false
+    
+    @Volatile
+    private var isClosed = false
 
     fun initializeEngine(): Boolean {
-        if (isReady && llmInference != null) return true
+        if (llmInference != null) return true
 
         return try {
             val modelFile = File(modelPath)
-            Log.i(tag, "Model path: $modelPath")
-            Log.i(tag, "Exists: ${modelFile.exists()} size=${modelFile.length()}")
-
-            if (!modelFile.exists()) {
-                isReady = false
-                return false
-            }
+            if (!modelFile.exists()) return false
 
             val inferenceOptions = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(modelPath)
@@ -33,43 +31,67 @@ class SecureActionAgent(
                 .build()
 
             llmInference = LlmInference.createFromOptions(context, inferenceOptions)
-            isReady = true
+            Log.i(tag, "Engine initialized successfully.")
             true
         } catch (t: Throwable) {
             Log.e(tag, "Init failed", t)
-            isReady = false
             llmInference = null
             false
         }
     }
 
-    fun generateActionAdvice(threatScore: Int, activeDevices: String): String {
+    fun assessTacticalConcern(
+        primaryConcern: String,
+        environment: String,
+        threatLevel: Int
+    ): AiAnalysisResult {
         val inference = llmInference
-            ?: return "Tactical AI Unavailable: Core initialization pending or failed."
+        if (inference == null || isClosed) {
+            return AiAnalysisResult("Subsystem Standby.", "Core initialization pending.", "low")
+        }
 
         val prompt = """
 <start_of_turn>user
-Threat level: $threatScore
-Environment: $activeDevices
+SIGINT SITUATION REPORT
+ZONE CONTEXT: $environment
+LOCAL ALERT: $primaryConcern
+THREAT LEVEL: $threatLevel/100
 
-Provide exactly 2 short sentences of tactical network defense advice. 
-Do not use lists, labels, or extra explanation.<end_of_turn>
+TASK: 
+As SOPHIA, cross-reference the Local Alert with the Zone Context. 
+Provide a high-level technical implication and one tactical directive.
+Do not use conversational filler. Provide exactly two technical sentences.
+<end_of_turn>
 <start_of_turn>model
-""".trimIndent()
+Analysis:""".trimIndent()
 
         return try {
-            Log.d(tag, "Generating response directly...")
             val raw = inference.generateResponse(prompt)
-            Log.d(tag, "Response received: length=${raw.length}")
+            Log.d(tag, "AI Raw: $raw")
             
-            if (raw.isBlank()) {
-                "Strategic analysis returned no actionable data. Maintain current posture."
-            } else {
-                limitToTwoSentences(normalizeResponse(raw))
-            }
+            // Clean up model output aggressively
+            val cleaned = raw.substringAfter("Analysis:")
+                .replace(Regex("(?i)okay,.*"), "")
+                .replace(Regex("(?i)sure,.*"), "")
+                .replace(Regex("(?i)directive:"), "")
+                .replace(Regex("\\*\\*"), "")
+                .replace(Regex("\\\\n"), " ")
+                .replace(Regex("\\n"), " ")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+
+            val sentences = cleaned.split(Regex("(?<=[.!?])\\s+"))
+            val summary = sentences.getOrNull(0) ?: "Target signature identified in environment."
+            val action = sentences.drop(1).joinToString(" ").ifBlank { "Maintain current monitoring posture." }
+
+            AiAnalysisResult(
+                summary.take(200), 
+                action.take(150), 
+                if (threatLevel > 50) "high" else "medium"
+            )
         } catch (t: Throwable) {
-            Log.e(tag, "Inference failed", t)
-            "Strategic analysis suspended: ${t.localizedMessage ?: t.javaClass.simpleName}"
+            Log.e(tag, "Assessment failed", t)
+            AiAnalysisResult("Strategic analysis suspended.", "Monitor logs for anomalies.", "low")
         }
     }
 
@@ -83,62 +105,51 @@ Do not use lists, labels, or extra explanation.<end_of_turn>
         riskScore: Int
     ): String {
         val inference = llmInference
-            ?: return "Tactical AI Unavailable."
+        if (inference == null || isClosed) return "Tactical AI Unavailable."
 
         val prompt = """
 <start_of_turn>user
-Identify this device:
-NAME: $name
-MAC: $address
-VENDOR: ${vendor ?: "Unknown"}
-TYPE: $type
+[TASK]
+Identify likely device class and operational intent for this electronic signature. 
+Do not repeat the target data. Provide exactly 2 short technical sentences.
 
-If VENDOR is "Private Address", explain it is a modern smartphone privacy feature. Otherwise, analyze the name and MAC to guess the manufacturer. State if it is likely "Friendly" or "Suspicious". 
-Provide exactly 2 sentences. Do not repeat these instructions.<end_of_turn>
+[DATA]
+Target: $name ($address)
+Vendor: ${vendor ?: "Unknown"}
+RSSI: ${signal}dBm / RISK: $riskScore
+<end_of_turn>
 <start_of_turn>model
-""".trimIndent()
+Analysis:""".trimIndent()
 
         return try {
             val raw = inference.generateResponse(prompt)
-            cleanAiResponse(raw)
+            val output = raw.substringAfter("Analysis:")
+                .replace(Regex("(?i)okay,.*"), "")
+                .replace(Regex("(?i)sure,.*"), "")
+                .replace(Regex("\\*\\*"), "")
+                .replace(Regex("\\\\n"), " ")
+                .replace(Regex("\\n"), " ")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+            
+            if (output.length < 10) {
+                "Signature analysis complete. Target categorized as $type device with $riskScore% threat probability."
+            } else {
+                output
+            }
         } catch (t: Throwable) {
             Log.e(tag, "Device analysis failed", t)
             "Analysis failed: ${t.localizedMessage ?: t.javaClass.simpleName}"
         }
     }
 
-    private fun cleanAiResponse(text: String): String {
-        return text.replace(Regex("\\*\\*"), "") // Remove bold markers
-            .replace(Regex("\\\\n"), " ")       // Remove literal \n strings
-            .replace(Regex("\\n"), " ")         // Remove actual newlines
-            .replace(Regex("\\s+"), " ")        // Collapse whitespace
-            .trim()
-    }
-
     fun close() {
+        isClosed = true
         try {
             llmInference?.close()
         } catch (t: Throwable) {
             Log.e(tag, "Error closing inference", t)
         }
-
         llmInference = null
-        isReady = false
-    }
-
-    private fun normalizeResponse(text: String): String {
-        return cleanAiResponse(text)
-    }
-
-    private fun limitToTwoSentences(text: String): String {
-        val parts = Regex("(?<=[.!?])\\s+")
-            .split(text)
-            .filter { it.isNotBlank() }
-
-        return when {
-            parts.isEmpty() -> "Tactical posture maintained. Monitor logs for anomalies."
-            parts.size == 1 -> parts[0]
-            else -> parts.take(2).joinToString(" ")
-        }
     }
 }

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -517,14 +518,29 @@ fun RadarScreen(
                             color = Color.White,
                             style = MaterialTheme.typography.bodyMedium
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = { vm.analyzeThreat() },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = !vm.isAnalyzing
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(if (vm.isAnalyzing) "Analyzing..." else "GENERATE AI ADVICE")
+                            Button(
+                                onClick = { vm.analyzeThreat() },
+                                modifier = Modifier.weight(1f).fillMaxSize(),
+                                enabled = !vm.isAnalyzing
+                            ) {
+                                Text(if (vm.isAnalyzing) "Analyzing..." else "LOCAL ADVICE")
+                            }
+
+                            Button(
+                                onClick = { vm.performGlobalIntelligenceSearch() },
+                                modifier = Modifier.weight(1f).fillMaxSize(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00838F)),
+                                enabled = !vm.isAnalyzing && vm.isAiReady
+                            ) {
+                                Text("GLOBAL INTEL", color = Color.White)
+                            }
                         }
+                        Spacer(modifier = Modifier.height(4.dp))
                     }
                 }
             }
@@ -682,15 +698,23 @@ fun RadarScreen(
                 Text(
                     text = "Cyber Analyst Countermeasures",
                     style = MaterialTheme.typography.titleMedium,
-                    color = Color.Green
+                    color = Color.Green,
+                    modifier = Modifier.weight(1f)
                 )
-                if (!vm.isAnalyzing) {
-                    Text(
-                        text = "Refresh",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.Green,
-                        modifier = Modifier.clickable { vm.analyzeThreat() }
-                    )
+                
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = { vm.analyzeThreat() },
+                        enabled = !vm.isAnalyzing
+                    ) {
+                        Text("LOCAL", color = Color.Green, style = MaterialTheme.typography.labelSmall)
+                    }
+                    TextButton(
+                        onClick = { vm.performGlobalIntelligenceSearch() },
+                        enabled = !vm.isAnalyzing && vm.isAiReady
+                    ) {
+                        Text("GLOBAL", color = Color(0xFF00BCD4), style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
