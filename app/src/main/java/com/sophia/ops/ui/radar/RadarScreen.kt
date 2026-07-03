@@ -50,6 +50,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -318,8 +319,8 @@ fun RadarScreen(
                     color = Color.Gray
                 )
             } else {
+                val context = LocalContext.current
                 // Show last 3 devices for brevity, or a scrollable list
-                val exampleNotes = listOf(null, "Medical ECG", "Trusted", "Kitchen", "Temporary")
                 vm.bluetoothDevices.takeLast(3).reversed().forEach { device ->
                     Row(
                         modifier = Modifier
@@ -333,12 +334,6 @@ fun RadarScreen(
                                 .weight(1f)
                                 .clickable {
                                     vm.selectBluetoothDevice(device)
-                                    // Cycle notes logic shifted to a double tap or long press? 
-                                    // For now, let's just make click select, and maybe a specific button for notes?
-                                    // Or just cycle on click and select.
-                                    val currentIndex = exampleNotes.indexOf(device.notes)
-                                    val nextIndex = (currentIndex + 1) % exampleNotes.size
-                                    vm.updateNotes(device, exampleNotes[nextIndex])
                                 }
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -355,9 +350,13 @@ fun RadarScreen(
                                     modifier = Modifier.padding(end = 8.dp)
                                 )
 
+                                val vendor = remember(device.address) {
+                                    OuiLookup.getVendor(context, device.address)
+                                }
                                 val displayName = when {
                                     !device.nickname.isNullOrBlank() -> device.nickname
-                                    !device.name.isNullOrBlank() && !device.name.startsWith("Discovered Device") -> device.name
+                                    !device.name.isNullOrBlank() && !device.name.startsWith("Discovered Device") && !device.name.contains("Unknown", true) -> device.name
+                                    vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)" -> vendor
                                     else -> "Unknown Bluetooth Device"
                                 }
                                 
@@ -447,20 +446,64 @@ fun RadarScreen(
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     if (vm.isAiLoading) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.Green)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.Green)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Loading Engine...", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                        }
+                    } else if (vm.isDownloading) {
+                        Text(
+                            text = "📥 DOWNLOADING TACTICAL MODEL",
+                            color = Color(0xFF00BCD4),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = { vm.downloadProgress },
+                            modifier = Modifier.fillMaxWidth().height(8.dp),
+                            color = Color.Green,
+                            trackColor = Color.DarkGray
+                        )
+                        Text(
+                            text = "${(vm.downloadProgress * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.End
+                        )
                     } else if (!vm.isAiReady) {
                         Text(
                             text = if (vm.aiInitializationFailed) "⚠️ AI INITIALIZATION FAILED" else "🤖 AI ENGINE STANDBY",
                             color = if (vm.aiInitializationFailed) Color.Red else Color(0xFF00BCD4),
                             style = MaterialTheme.typography.labelSmall
                         )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = vm.aiAdviceText,
+                            color = Color.Gray,
+                            style = MaterialTheme.typography.bodySmall
+                        )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = { vm.activateOnDeviceAI() },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BCD4))
-                        ) {
-                            Text("INITIALIZE COGNITIVE AI CORE")
+                        
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            Button(
+                                onClick = { vm.activateOnDeviceAI() },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BCD4))
+                            ) {
+                                Text("INITIALIZE")
+                            }
+                            
+                            if (!vm.isModelPresent) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = { vm.downloadModel() },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
+                                ) {
+                                    Text("DOWNLOAD")
+                                }
+                            }
                         }
                     } else {
                         Text(
@@ -576,6 +619,53 @@ fun RadarScreen(
                             "Seen", 
                             "${device.timesSeen} Times"
                         )
+                    }
+
+                    // Deep Scan Section
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    if (vm.deepScanResult == null && !vm.isDeepScanning) {
+                        Button(
+                            onClick = { vm.performDeepScan(device) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BCD4)),
+                            enabled = vm.isAiReady
+                        ) {
+                            Text("DEEP SCAN TARGET")
+                        }
+                    } else {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = Color.Black.copy(alpha = 0.3f)
+                            ),
+                            border = BorderStroke(1.dp, Color(0xFF00BCD4).copy(alpha = 0.5f))
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (vm.isDeepScanning) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(14.dp),
+                                            strokeWidth = 2.dp,
+                                            color = Color(0xFF00BCD4)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                    }
+                                    Text(
+                                        text = "SOPHIA TARGET ANALYSIS",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF00BCD4),
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = vm.deepScanResult ?: "",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White
+                                )
+                            }
+                        }
                     }
                 }
             }

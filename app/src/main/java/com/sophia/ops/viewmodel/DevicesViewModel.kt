@@ -24,11 +24,19 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
         wifiDao.getAll()
     ) { bluetoothDevices, wifiNetworks ->
         val btList = bluetoothDevices.filter { !it.ignored }.map { entity ->
+            val vendor = OuiLookup.getVendor(getApplication(), entity.address)
+            val rawName = entity.nickname ?: entity.name
+            val displayName = when {
+                !rawName.isNullOrBlank() && !rawName.startsWith("Discovered Device") && !rawName.contains("Unknown", true) -> rawName
+                vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)" -> vendor
+                else -> "Unknown Bluetooth Device"
+            }
+
             NetworkDevice(
                 id = entity.address,
-                name = entity.nickname ?: entity.name ?: "Unknown Bluetooth Device",
+                name = displayName,
                 address = entity.address,
-                vendor = OuiLookup.getVendor(getApplication(), entity.address),
+                vendor = vendor,
                 type = DeviceType.BLUETOOTH,
                 signal = entity.rssi,
                 favourite = entity.favourite,
@@ -37,11 +45,22 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
         }
 
         val wifiList = wifiNetworks.map { network ->
+            val vendor = OuiLookup.getVendor(getApplication(), network.bssid)
+            val displayName = if (network.ssid.isBlank() || network.ssid == "<unknown ssid>") {
+                if (vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)") {
+                    vendor
+                } else {
+                    "Hidden Network"
+                }
+            } else {
+                network.ssid
+            }
+
             NetworkDevice(
                 id = network.bssid,
-                name = network.ssid,
+                name = displayName,
                 address = network.bssid,
-                vendor = OuiLookup.getVendor(getApplication(), network.bssid),
+                vendor = vendor,
                 type = DeviceType.WIFI,
                 signal = network.signal,
                 favourite = false,

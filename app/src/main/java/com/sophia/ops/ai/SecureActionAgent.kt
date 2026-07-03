@@ -13,11 +13,10 @@ class SecureActionAgent(
     private val tag = "SecureActionAgent"
 
     private var llmInference: LlmInference? = null
-    private var llmSession: LlmInferenceSession? = null
     private var isReady = false
 
     fun initializeEngine(): Boolean {
-        if (isReady && llmInference != null && llmSession != null) return true
+        if (isReady && llmInference != null) return true
 
         return try {
             val modelFile = File(modelPath)
@@ -31,66 +30,117 @@ class SecureActionAgent(
 
             val inferenceOptions = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(modelPath)
-                .setMaxTokens(64)
+                .setMaxTokens(128)
                 .build()
 
             llmInference = LlmInference.createFromOptions(context, inferenceOptions)
-
-            val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
-                .build()
-
-            llmSession = LlmInferenceSession.createFromOptions(
-                llmInference!!,
-                sessionOptions
-            )
-
             isReady = true
             true
         } catch (t: Throwable) {
             Log.e(tag, "Init failed", t)
             isReady = false
-            llmSession = null
             llmInference = null
             false
         }
     }
 
     fun generateActionAdvice(threatScore: Int, activeDevices: String): String {
-        val session = llmSession
+        val inference = llmInference
             ?: return "Tactical AI Unavailable: Core initialization pending or failed."
 
-        return try {
-            val prompt = """
+        val prompt = """
+<start_of_turn>user
 Threat level: $threatScore
 Environment: $activeDevices
 
-Provide exactly 2 short sentences of tactical network defense advice.
-Do not use lists, labels, or extra explanation.
+Provide exactly 2 short sentences of tactical network defense advice. 
+Do not use lists, labels, or extra explanation.<end_of_turn>
+<start_of_turn>model
 """.trimIndent()
 
+        var session: LlmInferenceSession? = null
+
+        return try {
+            Log.d(tag, "Creating session...")
+            session = LlmInferenceSession.createFromOptions(
+                inference,
+                LlmInferenceSession.LlmInferenceSessionOptions.builder().build()
+            )
+
+            Log.d(tag, "Adding query chunk...")
             session.addQueryChunk(prompt)
+            
+            Log.d(tag, "Generating response...")
             val raw = session.generateResponse()
-            limitToTwoSentences(normalizeResponse(raw))
+            Log.d(tag, "Response received: length=${raw.length}")
+            
+            if (raw.isBlank()) {
+                "Strategic analysis returned no actionable data. Maintain current posture."
+            } else {
+                limitToTwoSentences(normalizeResponse(raw))
+            }
         } catch (t: Throwable) {
             Log.e(tag, "Inference failed", t)
-            "Strategic analysis suspended: Maintain current defensive posture and monitor logs."
+            "Strategic analysis suspended: ${t.localizedMessage ?: t.javaClass.simpleName}"
+        } finally {
+            try {
+                session?.close()
+            } catch (closeError: Throwable) {
+                Log.e(tag, "Error closing inference session", closeError)
+            }
+        }
+    }
+
+    fun analyzeDevice(
+        name: String,
+        address: String,
+        vendor: String?,
+        type: String,
+        signal: Int,
+        timesSeen: Int,
+        riskScore: Int
+    ): String {
+        val inference = llmInference
+            ?: return "Tactical AI Unavailable."
+
+        val prompt = """
+<start_of_turn>user
+Analyze this network device for potential security risks:
+Name: $name
+Address: $address
+Vendor: ${vendor ?: "Unknown"}
+Type: $type
+Signal: ${signal}dBm
+Times Seen: $timesSeen
+Internal Risk Score: $riskScore/100
+
+Provide a 1-sentence tactical assessment of what this device likely is and if it should be trusted.<end_of_turn>
+<start_of_turn>model
+""".trimIndent()
+
+        var session: LlmInferenceSession? = null
+        return try {
+            session = LlmInferenceSession.createFromOptions(
+                inference,
+                LlmInferenceSession.LlmInferenceSessionOptions.builder().build()
+            )
+            session.addQueryChunk(prompt)
+            val raw = session.generateResponse()
+            normalizeResponse(raw)
+        } catch (t: Throwable) {
+            "Analysis failed: ${t.localizedMessage}"
+        } finally {
+            session?.close()
         }
     }
 
     fun close() {
-        try {
-            llmSession?.close()
-        } catch (t: Throwable) {
-            Log.e(tag, "Error closing session", t)
-        }
-
         try {
             llmInference?.close()
         } catch (t: Throwable) {
             Log.e(tag, "Error closing inference", t)
         }
 
-        llmSession = null
         llmInference = null
         isReady = false
     }
@@ -105,7 +155,7 @@ Do not use lists, labels, or extra explanation.
             .filter { it.isNotBlank() }
 
         return when {
-            parts.isEmpty() -> "Strategic analysis suspended: Maintain current defensive posture and monitor logs."
+            parts.isEmpty() -> "Tactical posture maintained. Monitor logs for anomalies."
             parts.size == 1 -> parts[0]
             else -> parts.take(2).joinToString(" ")
         }

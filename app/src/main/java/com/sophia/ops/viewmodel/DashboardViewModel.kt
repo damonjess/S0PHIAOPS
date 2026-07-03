@@ -42,6 +42,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
 import java.io.File
+import java.io.FileOutputStream
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -93,6 +95,17 @@ class DashboardViewModel(
         pruneData()
         preloadOuiDatabase()
         startAiRequestObserver()
+        checkModelExists()
+    }
+
+    private fun checkModelExists() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val exists = File("${getApplication<Application>().filesDir}/model.task").exists() || 
+                         File("/data/local/tmp/llm/model.task").exists()
+            withContext(Dispatchers.Main) {
+                isModelPresent = exists
+            }
+        }
     }
 
     private fun startAiRequestObserver() {
@@ -161,7 +174,22 @@ class DashboardViewModel(
     var isAiLoading by mutableStateOf(value = false)
         private set
 
+    var isDownloading by mutableStateOf(false)
+        private set
+
+    var downloadProgress by mutableStateOf(0f)
+        private set
+
     var isAnalyzing by mutableStateOf(value = false)
+        private set
+
+    var isDeepScanning by mutableStateOf(false)
+        private set
+
+    var deepScanResult by mutableStateOf<String?>(null)
+        private set
+
+    var isModelPresent by mutableStateOf(false)
         private set
 
     private val analysisInProgress = AtomicBoolean(false)
@@ -180,7 +208,10 @@ class DashboardViewModel(
 
             val candidateModelPaths = listOf(
                 "${getApplication<Application>().filesDir}/model.task",
-                "/data/local/tmp/llm/model.task"
+                "/data/local/tmp/llm/model.task",
+                "/sdcard/Download/model.task",
+                "/sdcard/Downloads/model.task",
+                "/storage/emulated/0/Download/model.task"
             )
             
             val targetPath = candidateModelPaths.find { File(it).exists() }
@@ -188,7 +219,7 @@ class DashboardViewModel(
             if (targetPath == null) {
                 withContext(Dispatchers.Main) {
                     aiInitializationFailed = true
-                    aiAdviceText = "AI weights file missing. Checked: ${candidateModelPaths.joinToString()}"
+                    aiAdviceText = "AI weights file missing. Click 'Download Model' in settings or use ADB."
                     isAiLoading = false
                 }
                 return@launch
@@ -217,6 +248,60 @@ class DashboardViewModel(
                     aiInitializationFailed = true
                     aiAdviceText = "AI Subsystem Error: ${t.localizedMessage}"
                     isAiLoading = false
+                }
+            }
+        }
+    }
+
+    fun downloadModel(modelUrl: String = "https://storage.googleapis.com/mediapipe-models/llm/gemma-2b-it-cpu-int4.task") {
+        if (isDownloading) return
+        
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            withContext(Dispatchers.Main) {
+                isDownloading = true
+                aiAdviceText = "Downloading Tactical Engine (approx 1.2GB)..."
+                downloadProgress = 0f
+            }
+            
+            val targetFile = File(getApplication<Application>().filesDir, "model.task")
+            try {
+                val url = URL(modelUrl)
+                val connection = url.openConnection()
+                connection.connect()
+                
+                val fileLength = connection.contentLength
+                val input = url.openStream()
+                val output = FileOutputStream(targetFile)
+                
+                val data = ByteArray(16384)
+                var total: Long = 0
+                var count: Int
+                while (input.read(data).also { count = it } != -1) {
+                    total += count
+                    if (fileLength > 0) {
+                        withContext(Dispatchers.Main) {
+                            downloadProgress = total.toFloat() / fileLength.toFloat()
+                        }
+                    }
+                    output.write(data, 0, count)
+                }
+                
+                output.flush()
+                output.close()
+                input.close()
+                
+                withContext(Dispatchers.Main) {
+                    isDownloading = false
+                    isModelPresent = true
+                    aiAdviceText = "Download complete. Initializing engine..."
+                    activateOnDeviceAI()
+                }
+            } catch (e: Exception) {
+                Log.e(tag, "Model download failed", e)
+                if (targetFile.exists()) targetFile.delete()
+                withContext(Dispatchers.Main) {
+                    isDownloading = false
+                    aiAdviceText = "Download Failed: ${e.localizedMessage}"
                 }
             }
         }
@@ -331,11 +416,13 @@ class DashboardViewModel(
 
     fun selectDevice(device: NetworkDevice?) {
         selectedRadarDevice = device
+        deepScanResult = null
     }
 
     fun selectBluetoothDevice(entity: BluetoothDeviceEntity?) {
         selectedDevice = entity
         selectedRadarDevice = entity?.toNetworkDevice(getApplication())
+        deepScanResult = null
     }
 
     @Suppress("unused")
@@ -343,13 +430,56 @@ class DashboardViewModel(
         selectedRadarDevice = network?.toNetworkDevice(getApplication())
     }
 
+    fun performDeepScan(device: NetworkDevice) {
+        if (!isAiReady) return
+        
+        aiScope.launch(exceptionHandler) {
+            withContext(Dispatchers.Main) {
+                isDeepScanning = true
+                deepScanResult = "SOPHIA analyzing target signature..."
+            }
+            
+            val agent = tacticalAgent
+            if (agent != null) {
+                val result = agent.analyzeDevice(
+                    name = device.name,
+                    address = device.address,
+                    vendor = device.vendor,
+                    type = device.type.name,
+                    signal = device.signal,
+                    timesSeen = device.timesSeen,
+                    riskScore = device.riskScore
+                )
+                
+                withContext(Dispatchers.Main) {
+                    deepScanResult = result
+                    isDeepScanning = false
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    isDeepScanning = false
+                    deepScanResult = "AI Engine unavailable for Deep Scan."
+                }
+            }
+        }
+    }
+
     private fun BluetoothDeviceEntity.toNetworkDevice(app: Application): NetworkDevice {
         val baseAngle = (this.address.hashCode().toFloat() % 360f)
+        val vendor = OuiLookup.getVendor(app, this.address)
+        
+        val rawName = this.nickname ?: this.name
+        val displayName = when {
+            !rawName.isNullOrBlank() && !rawName.startsWith("Discovered Device") && !rawName.contains("Unknown", true) -> rawName
+            vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)" -> vendor
+            else -> "Unknown Bluetooth Device"
+        }
+
         return NetworkDevice(
             id = this.address,
-            name = this.nickname ?: this.name ?: "Unknown Bluetooth Device",
+            name = displayName,
             address = this.address,
-            vendor = OuiLookup.getVendor(app, this.address),
+            vendor = vendor,
             type = DeviceType.BLUETOOTH,
             signal = this.rssi,
             favourite = this.favourite,
@@ -364,11 +494,23 @@ class DashboardViewModel(
 
     private fun WifiNetwork.toNetworkDevice(app: Application): NetworkDevice {
         val baseAngle = (this.bssid.hashCode().toFloat() % 360f)
+        val vendor = OuiLookup.getVendor(app, this.bssid)
+        
+        val displayName = if (this.ssid.isBlank() || this.ssid == "<unknown ssid>") {
+            if (vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)") {
+                vendor
+            } else {
+                "Hidden Network"
+            }
+        } else {
+            this.ssid
+        }
+
         return NetworkDevice(
             id = this.bssid,
-            name = this.ssid,
+            name = displayName,
             address = this.bssid,
-            vendor = OuiLookup.getVendor(app, this.bssid),
+            vendor = vendor,
             type = DeviceType.WIFI,
             signal = this.signal,
             favourite = false,
