@@ -2,6 +2,7 @@ package com.sophia.ops.viewmodel
 
 import android.app.Application
 import android.app.ActivityManager
+import android.os.Build
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.Context
@@ -198,7 +199,7 @@ class DashboardViewModel(
     var isGattExploring by mutableStateOf(false)
         private set
 
-    private val gattExplorer = BluetoothGattExplorer(application)
+    private var gattExplorer: BluetoothGattExplorer? = null
 
     var deepScanResult by mutableStateOf<String?>(null)
         private set
@@ -642,22 +643,49 @@ class DashboardViewModel(
         }
     }
 
-    fun exploreGatt(device: NetworkDevice) {
-        val bluetoothManager = getApplication<Application>().getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+    fun startGattExploration(address: String) {
+        val app = getApplication<Application>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (app.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                gattReport = "Error: BLUETOOTH_CONNECT permission not granted."
+                return
+            }
+        }
+
+        val bluetoothManager = app.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val adapter = bluetoothManager.adapter
-        val remoteDevice = adapter.getRemoteDevice(device.address)
+        val remoteDevice = adapter.getRemoteDevice(address)
 
         isGattExploring = true
-        gattReport = "Initializing GATT connection..."
-        
-        gattExplorer.explore(remoteDevice) { result ->
-            viewModelScope.launch(Dispatchers.Main) {
-                gattReport = result
-                if (result == "Disconnected." || result.startsWith("GATT Error") || result.startsWith("GATT Services")) {
+        gattReport = "Preparing secure connection..."
+
+        gattExplorer = BluetoothGattExplorer(
+            context = app,
+            onProgress = { msg ->
+                viewModelScope.launch(Dispatchers.Main) { gattReport = msg }
+            },
+            onComplete = { services, _ ->
+                viewModelScope.launch(Dispatchers.Main) {
+                    gattReport = "GATT Exploration Complete:\n" + services.joinToString("\n")
+                    isGattExploring = false
+                }
+            },
+            onError = { code, msg ->
+                viewModelScope.launch(Dispatchers.Main) {
+                    gattReport = "GATT Error ($code): $msg"
                     isGattExploring = false
                 }
             }
+        )
+
+        viewModelScope.launch(Dispatchers.Main) {
+            delay(500)
+            gattExplorer?.connectAndExplore(remoteDevice)
         }
+    }
+
+    fun exploreGatt(device: NetworkDevice) {
+        startGattExploration(device.address)
     }
 
     fun BluetoothDeviceEntity.toNetworkDevice(app: Application): NetworkDevice {

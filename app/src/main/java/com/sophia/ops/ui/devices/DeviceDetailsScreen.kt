@@ -177,12 +177,12 @@ fun BluetoothDetails(address: String, vm: DeviceDetailsViewModel, dashboardVm: D
                 val context = LocalContext.current
                 Button(
                     onClick = { 
-                        dashboardVm.exploreGatt(with(dashboardVm) { device.toNetworkDevice(context.applicationContext as android.app.Application) })
+                        dashboardVm.startGattExploration(address)
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91E63))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B0000))
                 ) {
-                    Text("EXPLORE GATT SERVICES")
+                    Text("GATT EXPLORATION")
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -200,17 +200,42 @@ fun BluetoothDetails(address: String, vm: DeviceDetailsViewModel, dashboardVm: D
                 
                 if (dashboardVm.gattReport != null) {
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("GATT Report:", style = MaterialTheme.typography.titleSmall)
+                    val isError = dashboardVm.gattReport!!.startsWith("GATT Error") || 
+                                  dashboardVm.gattReport!!.startsWith("GATT Connection Failed") ||
+                                  dashboardVm.gattReport!!.startsWith("Error:")
+                    
+                    Text(if (isError) "GATT Error Details:" else "GATT Report:", style = MaterialTheme.typography.titleSmall, color = if (isError) Color.Red else Color.White)
                     Card(
                         modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.3f))
+                        colors = CardDefaults.cardColors(containerColor = if (isError) Color.Red.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.3f)),
+                        border = if (isError) BorderStroke(1.dp, Color.Red.copy(alpha = 0.5f)) else null
                     ) {
-                        Text(
-                            text = dashboardVm.gattReport!!,
-                            modifier = Modifier.padding(12.dp).verticalScroll(rememberScrollState()),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White
-                        )
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = dashboardVm.gattReport!!,
+                                modifier = Modifier.verticalScroll(rememberScrollState()),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isError) Color.Red else Color.White
+                            )
+                            if (isError) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "Common causes: Device out of range, not connectable, or needs pairing.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White.copy(alpha = 0.7f)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = { 
+                                        dashboardVm.exploreGatt(with(dashboardVm) { device.toNetworkDevice(context.applicationContext as android.app.Application) })
+                                    },
+                                    modifier = Modifier.align(Alignment.End),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.6f))
+                                ) {
+                                    Text("RE-EXPLORE", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
                     }
                 }
             }
