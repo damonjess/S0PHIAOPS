@@ -45,54 +45,17 @@ class SecureActionAgent(
         environment: String,
         threatLevel: Int
     ): AiAnalysisResult {
-        val inference = llmInference
-        if (inference == null || isClosed) {
-            return AiAnalysisResult("Subsystem Standby.", "Core initialization pending.", "low")
+        val action = when {
+            threatLevel > 70 -> "Investigate the flagged device(s) immediately and consider blocking unfamiliar high-risk devices from your network."
+            threatLevel > 30 -> "Review recently detected devices and confirm you recognize them."
+            else -> "No action needed — continue routine monitoring."
         }
 
-        val prompt = """
-<start_of_turn>user
-SIGINT SITUATION REPORT
-ZONE CONTEXT: $environment
-LOCAL ALERT: $primaryConcern
-THREAT LEVEL: $threatLevel/100
-
-TASK: 
-As SOPHIA, cross-reference the Local Alert with the Zone Context. 
-Provide a high-level technical implication and one tactical directive.
-Do not use conversational filler. Provide exactly two technical sentences.
-<end_of_turn>
-<start_of_turn>model
-Analysis:""".trimIndent()
-
-        return try {
-            val raw = inference.generateResponse(prompt)
-            Log.d(tag, "AI Raw: $raw")
-            
-            // Clean up model output aggressively
-            val cleaned = raw.substringAfter("Analysis:")
-                .replace(Regex("(?i)okay,.*"), "")
-                .replace(Regex("(?i)sure,.*"), "")
-                .replace(Regex("(?i)directive:"), "")
-                .replace(Regex("\\*\\*"), "")
-                .replace(Regex("\\\\n"), " ")
-                .replace(Regex("\\n"), " ")
-                .replace(Regex("\\s+"), " ")
-                .trim()
-
-            val sentences = cleaned.split(Regex("(?<=[.!?])\\s+"))
-            val summary = sentences.getOrNull(0) ?: "Target signature identified in environment."
-            val action = sentences.drop(1).joinToString(" ").ifBlank { "Maintain current monitoring posture." }
-
-            AiAnalysisResult(
-                summary.take(200), 
-                action.take(150), 
-                if (threatLevel > 50) "high" else "medium"
-            )
-        } catch (t: Throwable) {
-            Log.e(tag, "Assessment failed", t)
-            AiAnalysisResult("Strategic analysis suspended.", "Monitor logs for anomalies.", "low")
-        }
+        return AiAnalysisResult(
+            riskSummary = primaryConcern,
+            recommendedAction = action,
+            confidence = if (threatLevel > 50) "high" else "medium"
+        )
     }
 
     @Synchronized
@@ -105,53 +68,25 @@ Analysis:""".trimIndent()
         timesSeen: Int,
         riskScore: Int
     ): String {
-        val factualPrefix = if (vendor == "Private Address (Randomized)") {
-            "This is a randomized privacy MAC address, common on modern smartphones — it changes periodically and cannot be traced to a specific manufacturer. "
+        // The verdict itself is fully deterministic — no model involved, so it can never be wrong or invented.
+        val verdict = when {
+            riskScore > 70 -> "This device is flagged as high risk and worth investigating."
+            riskScore > 30 -> "This device has an elevated risk score — keep an eye on it."
+            timesSeen > 20 -> "This is a frequently-seen, low-risk device — likely something nearby you own or pass often."
+            else -> "This appears to be an ordinary, low-risk device."
+        }
+
+        val vendorNote = if (vendor == "Private Address (Randomized)") {
+            " Its address is randomized for privacy, which is normal for modern phones and can't be traced to a manufacturer."
+        } else if (!vendor.isNullOrBlank() && vendor != "Unknown Vendor") {
+            " Identified vendor: $vendor."
         } else {
             ""
         }
 
-        val inference = llmInference ?: return factualPrefix + "AI engine unavailable for further analysis."
-
-        val vendorLine = if (!vendor.isNullOrBlank() && vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)") {
-            "Vendor: $vendor"
-        } else {
-            "Vendor: unknown"
-        }
-
-        val prompt = """
-<start_of_turn>user
-Device: "$name" ($type)
-$vendorLine
-Signal strength: ${signal}dBm
-Times seen: $timesSeen
-Risk score: $riskScore/100
-
-In one plain sentence, comment on whether this specific device looks ordinary or worth keeping an eye on, referencing at least one concrete detail above (its name, vendor, how often it's been seen, or its risk score).
-Only use the facts given above. Do not invent radio/technical terms (e.g. do not mention spectral density, modulation, or similar) that were not provided.
-<end_of_turn>
-<start_of_turn>model
-""".trimIndent()
-
-        return try {
-            val raw = inference.generateResponse(prompt)
-            factualPrefix + sanitizeAdvice(raw)
-        } catch (t: Throwable) {
-            Log.e(tag, "Device analysis failed", t)
-            factualPrefix + "Verdict unavailable due to an analysis error."
-        }
+        return verdict + vendorNote
     }
 
-    private fun sanitizeAdvice(raw: String): String {
-        return raw.substringAfter("Analysis:")
-            .replace(Regex("(?i)okay,.*"), "")
-            .replace(Regex("(?i)sure,.*"), "")
-            .replace(Regex("\\*\\*"), "")
-            .replace(Regex("\\\\n"), " ")
-            .replace(Regex("\\n"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-    }
 
     @Synchronized
     fun askQuestion(question: String, environmentContext: String): String {
