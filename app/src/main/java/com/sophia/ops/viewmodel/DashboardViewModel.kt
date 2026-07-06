@@ -37,6 +37,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.CoroutineExceptionHandler
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -45,6 +46,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.flow.Flow
 import java.io.File
 import java.io.FileOutputStream
 import java.net.URL
@@ -204,14 +206,9 @@ class DashboardViewModel(
     var isDeepScanning by mutableStateOf(false)
         private set
 
-    var isReconRunning by mutableStateOf(false)
-        private set
-
-    var reconStatus by mutableStateOf("")
-        private set
-
-    var gattReport by mutableStateOf<String?>(null)
-        private set
+    var gattReport: String by mutableStateOf("")
+    var reconStatus: String by mutableStateOf("")
+    var isReconRunning: Boolean by mutableStateOf(false)
 
     var isGattExploring by mutableStateOf(false)
         private set
@@ -640,67 +637,49 @@ class DashboardViewModel(
 
         viewModelScope.launch(Dispatchers.IO) {
             isReconRunning = true
-            withContext(Dispatchers.Main) {
-                reconStatus = "🔍 Starting Deep Recon on ${device.name}..."
-            }
+            reconStatus = "🔍 Starting Deep Recon on ${device.name}..."
 
             try {
-                // Get or guess IP
-                val ip = if (device.ipAddress.isNotBlank() && device.ipAddress != "Unknown") {
-                    device.ipAddress
-                } else {
-                    "192.168.1.${device.address.takeLast(2).toIntOrNull(16) ?: 100}"
-                }
+                // Better IP fallback
+                val targetIp = device.ipAddress.takeIf { it != "Unknown" && it.isNotBlank() }
+                    ?: "192.168.1.${Math.abs(device.address.hashCode() % 254) + 1}"
 
-                withContext(Dispatchers.Main) {
-                    reconStatus = "📡 Scanning common ports on $ip..."
-                }
+                reconStatus = "📡 Scanning common ports on $targetIp..."
 
-                val openPorts = PentestRecon.quickPortScan(ip)
+                val openPorts = PentestRecon.quickPortScan(targetIp)
                 val banners = mutableMapOf<Int, String>()
 
-                withContext(Dispatchers.Main) {
-                    reconStatus = "📋 Reading banners from ${openPorts.size} open ports..."
-                }
-
-                openPorts.take(6).forEach { port ->
-                    PentestRecon.grabBanner(ip, port)?.let { banner ->
+                openPorts.take(8).forEach { port ->
+                    PentestRecon.grabBanner(targetIp, port)?.let { banner ->
                         banners[port] = banner
                     }
                 }
 
-                val osGuess = PentestRecon.guessOS(openPorts, banners)
+                val osGuess = PentestRecon.guessOS(openPorts)
 
-                withContext(Dispatchers.Main) {
-                    val updatedDevice = device.copy(
-                        ipAddress = ip,
-                        openPorts = openPorts,
-                        osGuess = osGuess,
-                        services = banners.values.toList()
-                    )
-                    
-                    if (selectedRadarDevice?.address == device.address) {
-                        selectedRadarDevice = updatedDevice
-                    }
+                val result = buildString {
+                    append("✅ Deep Recon Complete\n\n")
+                    append("Target IP: $targetIp\n")
+                    append("Open Ports: ${if (openPorts.isEmpty()) "None found" else openPorts.joinToString(", ")}\n")
+                    append("OS Guess: $osGuess\n\n")
 
-                    reconStatus = """
-                        ✅ Deep Recon Complete
-                        
-                        IP: $ip
-                        Open Ports: ${openPorts.joinToString(", ")}
-                        OS Guess: $osGuess
-                        ${if (banners.isNotEmpty()) "\nBanners:\n" + banners.map { "${it.key} → ${it.value.take(60)}" }.joinToString("\n") else ""}
-                    """.trimIndent()
-
-                    // Refresh UI lists / AI if needed
-                    if (shouldTriggerAiAnalysis()) {
-                        analyzeThreat()
+                    if (banners.isNotEmpty()) {
+                        append("Banners:\n")
+                        banners.forEach { (p, b) ->
+                            append("  $p → ${b.take(65)}\n")
+                        }
+                    } else if (openPorts.isNotEmpty()) {
+                        append("No service banners captured.\n")
+                    } else {
+                        append("No open ports detected on common services.\n")
                     }
                 }
+
+                reconStatus = result
+
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    reconStatus = "❌ Recon failed: ${e.localizedMessage ?: "Unknown error"}"
-                }
+                Log.e("DeepRecon", "Error", e)
+                reconStatus = "❌ Error during recon: ${e.localizedMessage ?: "Unknown error"}"
             } finally {
                 isReconRunning = false
             }
@@ -867,6 +846,9 @@ class DashboardViewModel(
     val bluetoothFoundToday: StateFlow<Int> = todaySessions
         .map { it.sumOf { s -> s.bluetoothCount } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val devices: StateFlow<List<NetworkDevice>> = snapshotFlow { allRadarDevices }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val highestThreatToday: StateFlow<String> = todaySessions
         .map { sessions ->

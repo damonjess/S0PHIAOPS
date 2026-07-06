@@ -28,7 +28,6 @@ import com.sophia.ops.ui.radar.RadarScreen
 import com.sophia.ops.ui.settings.SettingsScreen
 import com.sophia.ops.ui.statistics.StatisticsScreen
 import com.sophia.ops.viewmodel.DashboardViewModel
-import com.sophia.ops.viewmodel.DeviceDetailsViewModel
 import com.sophia.ops.viewmodel.DevicesViewModel
 import com.sophia.ops.viewmodel.HistoryViewModel
 import com.sophia.ops.viewmodel.StatisticsViewModel
@@ -102,12 +101,7 @@ fun AppNavigation(
                 ) { navController.navigate(Routes.HISTORY) }
             }
             composable(Routes.RADAR) {
-                RadarScreen(
-                    vm = viewModel,
-                    onDeviceClick = { device ->
-                        navController.navigate("device_details/${device.type.name}/${device.address}")
-                    }
-                )
+                RadarScreen(viewModel = viewModel)
             }
             composable(Routes.DEVICES) {
                 val devicesVm: DevicesViewModel = viewModel()
@@ -128,16 +122,19 @@ fun AppNavigation(
                 StatisticsScreen(vm = statsVm)
             }
             composable(Routes.DEVICE_DETAILS) { backStackEntry ->
-                val type = backStackEntry.arguments?.getString("type") ?: ""
                 val address = backStackEntry.arguments?.getString("address") ?: ""
-                val detailsVm: DeviceDetailsViewModel = viewModel()
-                DeviceDetailsScreen(
-                    type = type,
-                    address = address,
-                    vm = detailsVm,
-                    dashboardVm = viewModel,
-                    onBack = { navController.popBackStack() }
-                )
+                val device = viewModel.allRadarDevices.find { it.address == address }
+                
+                if (device != null) {
+                    DeviceDetailsScreen(
+                        device = device,
+                        viewModel = viewModel,
+                        onBack = { navController.popBackStack() }
+                    )
+                } else {
+                    // Fallback if device not found in current scan
+                    Text("Device not found")
+                }
             }
             composable(Routes.SETTINGS) {
                 SettingsScreen(vm = viewModel)
