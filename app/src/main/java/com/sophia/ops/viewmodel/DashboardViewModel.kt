@@ -6,6 +6,7 @@ import android.os.Build
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -66,42 +67,211 @@ class DashboardViewModel(
 
     private val tag = "DashboardViewModel"
 
-    // Dedicated single thread and scope for all on-device AI work — the engine 
-    // must always be created and invoked from exactly the same thread.
-    private val aiDispatcher = Executors.newSingleThreadExecutor { r ->
-        Thread(r, "SOPHIA-AI-Thread")
-    }.asCoroutineDispatcher()
-    
-    private val aiScope = CoroutineScope(aiDispatcher + SupervisorJob())
-    
-    // Channel for debouncing AI requests. CONFLATED ensures we only process the LATEST
-    // request if multiple scans finish while the AI is busy.
-    private val aiRequestChannel = Channel<Unit>(Channel.CONFLATED)
-
     private data class ScanDataSnapshot(
         val networks: List<WifiNetwork>,
         val bluetoothDevices: List<BluetoothDeviceEntity>,
         val threatScore: Int
     )
+
+    // --- State Properties (Explicit MutableState to avoid delegation issues) ---
+    private val _autoAiAnalysisEnabled = mutableStateOf(true)
+    var autoAiAnalysisEnabled: Boolean
+        get() = _autoAiAnalysisEnabled.value
+        private set(value) { _autoAiAnalysisEnabled.value = value }
+
+    private val _isWifiScanning = mutableStateOf(false)
+    private var isWifiScanning: Boolean
+        get() = _isWifiScanning.value
+        set(value) { _isWifiScanning.value = value }
+
+    private val _isBluetoothScanning = mutableStateOf(false)
+    private var isBluetoothScanning: Boolean
+        get() = _isBluetoothScanning.value
+        set(value) { _isBluetoothScanning.value = value }
+
+    val isScanning: Boolean
+        get() = isWifiScanning || isBluetoothScanning
+
+    val networks = mutableStateListOf<WifiNetwork>()
+    val bluetoothDevices = mutableStateListOf<BluetoothDeviceEntity>()
     
+    private val _selectedRadarDevice = mutableStateOf<NetworkDevice?>(null)
+    var selectedRadarDevice: NetworkDevice?
+        get() = _selectedRadarDevice.value
+        private set(value) { _selectedRadarDevice.value = value }
+
+    private val _selectedDevice = mutableStateOf<BluetoothDeviceEntity?>(null)
+    var selectedDevice: BluetoothDeviceEntity?
+        get() = _selectedDevice.value
+        private set(value) { _selectedDevice.value = value }
+
+    private val _aiResponse = mutableStateOf<String?>(null)
+    var aiResponse: String?
+        get() = _aiResponse.value
+        private set(value) { _aiResponse.value = value }
+
+    private val _cyberAnalystContext = mutableStateOf("Fresh environment scan in progress.")
+    var cyberAnalystContext: String
+        get() = _cyberAnalystContext.value
+        private set(value) { _cyberAnalystContext.value = value }
+
+    private val _lastGlobalAnalysis = mutableStateOf("")
+    var lastGlobalAnalysis: String
+        get() = _lastGlobalAnalysis.value
+        private set(value) { _lastGlobalAnalysis.value = value }
+
+    private val _aiAdviceText = mutableStateOf("AI Engine Standby. Click to initialize.")
+    var aiAdviceText: String
+        get() = _aiAdviceText.value
+        private set(value) { _aiAdviceText.value = value }
+
+    private val _aiInitializationFailed = mutableStateOf(false)
+    var aiInitializationFailed: Boolean
+        get() = _aiInitializationFailed.value
+        private set(value) { _aiInitializationFailed.value = value }
+
+    private val _isAiLoading = mutableStateOf(false)
+    var isAiLoading: Boolean
+        get() = _isAiLoading.value
+        private set(value) { _isAiLoading.value = value }
+
+    private val _isDownloading = mutableStateOf(false)
+    var isDownloading: Boolean
+        get() = _isDownloading.value
+        private set(value) { _isDownloading.value = value }
+
+    private val _downloadProgress = mutableStateOf(0f)
+    var downloadProgress: Float
+        get() = _downloadProgress.value
+        private set(value) { _downloadProgress.value = value }
+
+    private val _isAnalyzing = mutableStateOf(false)
+    var isAnalyzing: Boolean
+        get() = _isAnalyzing.value
+        private set(value) { _isAnalyzing.value = value }
+
+    private val _isDeepScanning = mutableStateOf(false)
+    var isDeepScanning: Boolean
+        get() = _isDeepScanning.value
+        private set(value) { _isDeepScanning.value = value }
+
+    private val _gattReport = mutableStateOf<String?>(null)
+    var gattReport: String?
+        get() = _gattReport.value
+        set(value) { _gattReport.value = value }
+
+    private val _isGattExploring = mutableStateOf(false)
+    var isGattExploring: Boolean
+        get() = _isGattExploring.value
+        set(value) { _isGattExploring.value = value }
+
+    private val _reconStatus = mutableStateOf("")
+    var reconStatus: String
+        get() = _reconStatus.value
+        set(value) { _reconStatus.value = value }
+
+    private val _isReconRunning = mutableStateOf(false)
+    var isReconRunning: Boolean
+        get() = _isReconRunning.value
+        set(value) { _isReconRunning.value = value }
+
+    private val _deepScanResult = mutableStateOf<String?>(null)
+    var deepScanResult: String?
+        get() = _deepScanResult.value
+        private set(value) { _deepScanResult.value = value }
+
+    private val _isModelPresent = mutableStateOf(false)
+    var isModelPresent: Boolean
+        get() = _isModelPresent.value
+        private set(value) { _isModelPresent.value = value }
+
+    private val _strategicBrief = mutableStateOf<String?>(null)
+    var strategicBrief: String?
+        get() = _strategicBrief.value
+        private set(value) { _strategicBrief.value = value }
+
+    private val _chatAnswer = mutableStateOf<String?>(null)
+    var chatAnswer: String?
+        get() = _chatAnswer.value
+        private set(value) { _chatAnswer.value = value }
+
+    private val _isChatLoading = mutableStateOf(false)
+    var isChatLoading: Boolean
+        get() = _isChatLoading.value
+        private set(value) { _isChatLoading.value = value }
+
+    private val _isThrottled = mutableStateOf(false)
+    var isThrottled: Boolean
+        get() = _isThrottled.value
+        private set(value) { _isThrottled.value = value }
+
+    private val _lastScanWasLive = mutableStateOf(false)
+    var lastScanWasLive: Boolean
+        get() = _lastScanWasLive.value
+        private set(value) { _lastScanWasLive.value = value }
+
+    private val _lastScanTime = mutableStateOf("Never")
+    var lastScanTime: String
+        get() = _lastScanTime.value
+        private set(value) { _lastScanTime.value = value }
+
+    // --- Internal Infrastructure ---
+    private val aiDispatcher = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "SOPHIA-AI-Thread")
+    }.asCoroutineDispatcher()
+    
+    private val aiScope = CoroutineScope(aiDispatcher + SupervisorJob())
+    private val aiRequestChannel = Channel<Unit>(Channel.CONFLATED)
+
     private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
         Log.e("CRASH_DEBUG", "Uncaught Exception in ViewModel scope", throwable)
     }
 
     private val db = SophiaDatabase.getInstance(application)
-    
     private val bluetoothDao = db.bluetoothDao()
     private val scanDao = db.scanSessionDao()
     private val wifiDao = db.wifiDao()
     
     private val scanner = WifiScanner(application)
     private val bluetoothScanner = BluetoothScanner(application)
-    
+
+    private val prefs by lazy {
+        getApplication<Application>().getSharedPreferences("sophia_prefs", Context.MODE_PRIVATE)
+    }
+
+    private var autoRefreshJob: Job? = null
+    private var lastAutoRefreshInterval: Long = 5000L
+    private var lastScanRequestTime = 0L
+    private val minScanInterval = 15000L
+
+    @Volatile
+    private var tacticalAgent: SecureActionAgent? = null 
+
+    val isAiReady: Boolean
+        get() = tacticalAgent != null
+
+    private var gattExplorer: BluetoothGattExplorer? = null
+    private val analysisInProgress = AtomicBoolean(false)
+    private val knownDeviceAddresses = mutableSetOf<String>()
+
     init {
-        pruneData()
-        preloadOuiDatabase()
-        startAiRequestObserver()
-        checkModelExists()
+        viewModelScope.launch {
+            try {
+                autoAiAnalysisEnabled = prefs.getBoolean("auto_ai_enabled", true)
+                pruneData()
+                preloadOuiDatabase()
+                startAiRequestObserver()
+                checkModelExists()
+                activateOnDeviceAI()
+            } catch (e: Exception) {
+                Log.e(tag, "Error during DashboardViewModel init", e)
+            }
+        }
+    }
+
+    fun toggleAutoAiAnalysis(enabled: Boolean) {
+        autoAiAnalysisEnabled = enabled
+        prefs.edit().putBoolean("auto_ai_enabled", enabled).apply()
     }
 
     private fun checkModelExists() {
@@ -140,97 +310,6 @@ class DashboardViewModel(
             Log.i(tag, "Automated Cleanup: Dropped unverified/low-risk signals older than 24 hours.")
         }
     }
-    
-    var isScanning by mutableStateOf(value = false)
-        private set
-
-    // Auto AI Analysis control
-    var autoAiAnalysisEnabled by mutableStateOf(false)
-        private set
-
-    fun toggleAutoAiAnalysis(enabled: Boolean) {
-        autoAiAnalysisEnabled = enabled
-    }
-
-    private var isWifiScanning = false
-    private var isBluetoothScanning = false
-
-    private var autoRefreshJob: Job? = null
-    private var lastAutoRefreshInterval: Long = 5000L
-    
-    private var lastScanRequestTime = 0L
-    private val minScanInterval = 15000L // Increased to 15s to reduce pressure during AI generation
-
-    val networks = mutableStateListOf<WifiNetwork>()
-    val bluetoothDevices = mutableStateListOf<BluetoothDeviceEntity>()
-    
-    var selectedRadarDevice by mutableStateOf<NetworkDevice?>(null)
-        private set
-
-    var selectedDevice by mutableStateOf<BluetoothDeviceEntity?>(null)
-        private set
-
-    var aiResponse by mutableStateOf<String?>(null)
-        private set
-
-    var cyberAnalystContext by mutableStateOf("Fresh environment scan in progress.")
-        private set
-
-    var lastGlobalAnalysis by mutableStateOf("")
-        private set
-
-    @Volatile
-    private var tacticalAgent: SecureActionAgent? = null 
-
-    val isAiReady: Boolean
-        get() = tacticalAgent != null
-
-    var aiAdviceText by mutableStateOf("AI Engine Standby. Click to initialize.")
-        private set
-
-    var aiInitializationFailed by mutableStateOf(value = false)
-        private set
-
-    var isAiLoading by mutableStateOf(value = false)
-        private set
-
-    var isDownloading by mutableStateOf(false)
-        private set
-
-    var downloadProgress by mutableStateOf(0f)
-        private set
-
-    var isAnalyzing by mutableStateOf(value = false)
-        private set
-
-    var isDeepScanning by mutableStateOf(false)
-        private set
-
-    var gattReport by mutableStateOf<String?>(null)
-    var isGattExploring by mutableStateOf(false)
-    private var gattExplorer: BluetoothGattExplorer? = null
-
-    var reconStatus: String by mutableStateOf("")
-    var isReconRunning: Boolean by mutableStateOf(false)
-
-    var deepScanResult by mutableStateOf<String?>(null)
-        private set
-
-    var isModelPresent by mutableStateOf(false)
-        private set
-
-    private val analysisInProgress = AtomicBoolean(false)
-
-    private val knownDeviceAddresses = mutableSetOf<String>()
-
-    var strategicBrief by mutableStateOf<String?>(null)
-        private set
-
-    var chatAnswer by mutableStateOf<String?>(null)
-        private set
-
-    var isChatLoading by mutableStateOf(false)
-        private set
 
     fun activateOnDeviceAI() {
         if (tacticalAgent != null || isAiLoading) return
@@ -437,8 +516,8 @@ class DashboardViewModel(
                 val displayName = when {
                     !dev.nickname.isNullOrBlank() -> dev.nickname
                     !dev.name.isNullOrBlank() && 
-                        !dev.name.startsWith("Discovered Device") && 
-                        !dev.name.contains("Unknown", ignoreCase = true) -> dev.name
+                        !dev.name.contains("Unknown", ignoreCase = true) && 
+                        !dev.name.startsWith("Discovered") -> dev.name
                     vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)" -> "$vendor Device"
                     else -> "Unknown Bluetooth Device"
                 }
@@ -638,46 +717,41 @@ class DashboardViewModel(
             reconStatus = "🔍 Starting Deep Recon on ${device.name}..."
 
             try {
-                // Better IP fallback
                 val targetIp = device.ipAddress.takeIf { it != "Unknown" && it.isNotBlank() }
-                    ?: "192.168.1.${Math.abs(device.address.hashCode() % 254) + 1}"
+                    ?: "192.168.1.${Math.abs(device.address.hashCode() % 250) + 1}"
 
                 reconStatus = "📡 Scanning common ports on $targetIp..."
 
                 val openPorts = PentestRecon.quickPortScan(targetIp)
                 val banners = mutableMapOf<Int, String>()
 
-                openPorts.take(8).forEach { port ->
+                openPorts.take(10).forEach { port ->
                     PentestRecon.grabBanner(targetIp, port)?.let { banner ->
                         banners[port] = banner
                     }
                 }
 
-                val osGuess = PentestRecon.guessOS(openPorts)
+                val osGuess = PentestRecon.guessOS(openPorts, banners)
 
-                val result = buildString {
+                val resultText = buildString {
                     append("✅ Deep Recon Complete\n\n")
-                    append("Target IP: $targetIp\n")
-                    append("Open Ports: ${if (openPorts.isEmpty()) "None found" else openPorts.joinToString(", ")}\n")
+                    append("IP: $targetIp\n")
+                    append("Open Ports: ${if (openPorts.isEmpty()) "None detected" else openPorts.joinToString(", ")}\n")
                     append("OS Guess: $osGuess\n\n")
-
                     if (banners.isNotEmpty()) {
                         append("Banners:\n")
-                        banners.forEach { (p, b) ->
-                            append("  $p → ${b.take(65)}\n")
+                        banners.forEach { (port, banner) ->
+                            append("  $port → ${banner.take(80)}\n")
                         }
                     } else if (openPorts.isNotEmpty()) {
-                        append("No service banners captured.\n")
-                    } else {
-                        append("No open ports detected on common services.\n")
+                        append("No banners captured (normal on modern devices)")
                     }
                 }
 
-                reconStatus = result
+                reconStatus = resultText
 
             } catch (e: Exception) {
-                Log.e("DeepRecon", "Error", e)
-                reconStatus = "❌ Error during recon: ${e.localizedMessage ?: "Unknown error"}"
+                reconStatus = "❌ Recon failed: ${e.localizedMessage}"
             } finally {
                 isReconRunning = false
             }
@@ -738,8 +812,8 @@ class DashboardViewModel(
         val displayName = when {
             !this.nickname.isNullOrBlank() -> this.nickname
             !this.name.isNullOrBlank() && 
-                !this.name.startsWith("Discovered Device") && 
-                !this.name.contains("Unknown", ignoreCase = true) -> this.name
+                !this.name.contains("Unknown", ignoreCase = true) && 
+                !this.name.startsWith("Discovered") -> this.name
             vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)" -> "$vendor Device"
             else -> "Unknown Bluetooth Device"
         }
@@ -891,15 +965,6 @@ class DashboardViewModel(
             else -> "HIGH"
         }
 
-    var isThrottled by mutableStateOf(false)
-        private set
-
-    var lastScanWasLive by mutableStateOf(false)
-        private set
-
-    var lastScanTime by mutableStateOf("Never")
-        private set
-
     val status: String
         get() = if (lastScanWasLive) "🟢 LIVE" else "🟠 THROTTLED"
 
@@ -942,7 +1007,6 @@ class DashboardViewModel(
         }
 
         lastScanRequestTime = now
-        isScanning = true
         isWifiScanning = true
         isBluetoothScanning = true
 
@@ -1039,7 +1103,6 @@ class DashboardViewModel(
             onDiscoveryFinished = {
                 viewModelScope.launch {
                     isBluetoothScanning = false
-                    isScanning = isWifiScanning || isBluetoothScanning
                     Log.i(tag, "Bluetooth discovery finished.")
                 }
             }
@@ -1064,7 +1127,6 @@ class DashboardViewModel(
             }
 
             viewModelScope.launch {
-                isThrottled = false 
                 lastScanWasLive = true
                 networks.clear()
                 networks.addAll(updatedList)
@@ -1082,7 +1144,6 @@ class DashboardViewModel(
                     } finally {
                         withContext(Dispatchers.Main) {
                             isWifiScanning = false
-                            isScanning = isWifiScanning || isBluetoothScanning
                         }
                     }
                 }
@@ -1114,7 +1175,6 @@ class DashboardViewModel(
         if (networks.isEmpty()) return
         
         viewModelScope.launch {
-            isThrottled = true 
             lastScanWasLive = false
             
             Log.d(tag, "Applying aggressive signal fuzz to keep radar alive.")
@@ -1132,7 +1192,6 @@ class DashboardViewModel(
             }
 
             delay(1000.milliseconds)
-            isThrottled = false
         }
     }
 

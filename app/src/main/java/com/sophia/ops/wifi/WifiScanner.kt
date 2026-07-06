@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
 
@@ -24,11 +26,17 @@ class WifiScanner(
     fun startScan(
         onResults: (List<ScanResult>) -> Unit
     ) {
+        val handler = Handler(Looper.getMainLooper())
+        var isFinished = false
+
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(
                 context: Context?,
                 intent: Intent?
             ) {
+                if (isFinished) return
+                isFinished = true
+                
                 try {
                     context?.unregisterReceiver(this)
                 } catch (e: Exception) {
@@ -45,6 +53,19 @@ class WifiScanner(
                 onResults(results)
             }
         }
+
+        // Safety timeout in case broadcast is never received
+        handler.postDelayed({
+            if (!isFinished) {
+                Log.w(tag, "Scan timeout reached, force-completing.")
+                isFinished = true
+                try {
+                    context.unregisterReceiver(receiver)
+                } catch (e: Exception) {}
+                val results = try { wifiManager.scanResults } catch (e: SecurityException) { emptyList() }
+                onResults(results)
+            }
+        }, 10000)
 
         try {
             // TargetSdk 34+ requires RECEIVER_EXPORTED or RECEIVER_NOT_EXPORTED for most broadcasts.

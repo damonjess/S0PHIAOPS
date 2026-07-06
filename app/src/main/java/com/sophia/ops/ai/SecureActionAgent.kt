@@ -42,55 +42,53 @@ class SecureActionAgent(
 
     fun assessTacticalConcern(
         primaryConcern: String,
-        environment: String,
-        threatLevel: Int
+        environment: String = "Field Operation",
+        threatLevel: Int = 0
     ): AiAnalysisResult {
-        val inference = llmInference
-        if (inference == null || isClosed) {
-            return AiAnalysisResult("Subsystem Standby.", "Core initialization pending.", "low")
-        }
-
-        // Better prompt — avoids fixation on specific devices like Flipper Zero
         val prompt = """
 <start_of_turn>user
-SIGINT SITUATION REPORT
-ZONE CONTEXT: $environment
-LOCAL ALERT: $primaryConcern
-THREAT LEVEL: $threatLevel/100
+You are SOPHIA, an elite tactical cyber intelligence AI for field operators.
 
-TASK: 
-Provide a short, factual technical implication and one tactical recommendation.
-Focus only on the current alert. Do not repeat previous findings.
-Do not mention specific device models unless they are in the current alert.
-Respond with exactly two sentences.
+SITUATION:
+- Location: $environment
+- Alert: $primaryConcern
+- Threat Level: $threatLevel/100
+
+Provide a concise tactical response in exactly this format:
+
+ASSESSMENT: [One short, professional sentence]
+RECOMMENDATION: [One clear, actionable recommendation]
+
+Focus on operational value. No fluff.
 <end_of_turn>
 <start_of_turn>model
-Analysis:""".trimIndent()
+""".trimIndent()
 
         return try {
-            val raw = inference.generateResponse(prompt)
-            
-            val cleaned = raw.substringAfter("Analysis:")
-                .replace(Regex("(?i)flipper zero|flipperzero", RegexOption.IGNORE_CASE), "BLE device")
-                .replace(Regex("(?i)okay,|sure,|well,"), "")
-                .replace(Regex("\\*\\*"), "")
-                .replace(Regex("\\n+"), " ")
-                .trim()
+            val raw = llmInference?.generateResponse(prompt) ?: return fallback()
 
-            val sentences = cleaned.split(Regex("(?<=[.!?])\\s+")).filter { it.isNotBlank() }
-            val summary = sentences.getOrNull(0) ?: "Target signature identified."
-            val action = sentences.getOrNull(1) ?: "Continue passive monitoring."
+            val assessment = raw.substringAfter("ASSESSMENT:").substringBefore("RECOMMENDATION:").trim()
+            val recommendation = raw.substringAfter("RECOMMENDATION:").trim()
 
             AiAnalysisResult(
-                summary.take(220),
-                action.take(160),
-                if (threatLevel > 60) "high" else "medium"
+                assessment.take(160),
+                recommendation.take(160),
+                when {
+                    threatLevel > 70 -> "high"
+                    threatLevel > 35 -> "medium"
+                    else -> "low"
+                }
             )
-        } catch (t: Throwable) {
-            Log.e(tag, "Assessment failed", t)
-            AiAnalysisResult("Analysis temporarily unavailable.", "Maintain current monitoring posture.", "low")
+        } catch (e: Exception) {
+            fallback()
         }
     }
+
+    private fun fallback() = AiAnalysisResult(
+        "Local analysis available but model response limited.",
+        "Continue passive collection and monitor for changes.",
+        "low"
+    )
 
     @Synchronized
     fun analyzeDevice(

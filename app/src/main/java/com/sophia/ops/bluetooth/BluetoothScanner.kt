@@ -29,13 +29,23 @@ class BluetoothScanner(
         onDeviceFound: (BluetoothDevice, Int) -> Unit,
         onDiscoveryFinished: () -> Unit = {}
     ) {
+        var isFinished = false
+        val safeOnDiscoveryFinished = {
+            if (!isFinished) {
+                isFinished = true
+                onDiscoveryFinished()
+            }
+        }
+
         if (adapter == null) {
             Log.e(tag, "BluetoothAdapter is null")
+            safeOnDiscoveryFinished()
             return
         }
 
         if (!adapter.isEnabled) {
             Log.e(tag, "Bluetooth is disabled. Cannot start discovery.")
+            safeOnDiscoveryFinished()
             return
         }
 
@@ -43,6 +53,7 @@ class BluetoothScanner(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 Log.e(tag, "Cannot start discovery: BLUETOOTH_SCAN permission not granted")
+                safeOnDiscoveryFinished()
                 return
             }
         }
@@ -122,7 +133,7 @@ class BluetoothScanner(
                         } catch (_: Exception) {
                             // Already unregistered
                         }
-                        onDiscoveryFinished()
+                        safeOnDiscoveryFinished()
                     }
                 }
             }
@@ -135,6 +146,8 @@ class BluetoothScanner(
                     leScanner?.stopScan(leCallback)
                 } catch (_: Exception) {
                 }
+                // If we hit this timeout, it means ACTION_DISCOVERY_FINISHED was likely missed
+                safeOnDiscoveryFinished()
             },
             15000,
         )
@@ -180,12 +193,14 @@ class BluetoothScanner(
                 } catch (_: Exception) {
                     // Ignore
                 }
+                safeOnDiscoveryFinished()
             }
         } catch (_: Exception) {
             Log.e(tag, "Error during discovery start")
             try {
                 context.unregisterReceiver(receiver)
             } catch (_: Exception) { }
+            safeOnDiscoveryFinished()
         }
     }
 }

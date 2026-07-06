@@ -137,7 +137,7 @@ fun AppNavigation(
                 }
             }
             composable(Routes.SETTINGS) {
-                SettingsScreen(vm = viewModel)
+                SettingsScreen(viewModel = viewModel)
             }
         }
     }
