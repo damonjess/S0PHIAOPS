@@ -7,7 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import kotlinx.coroutines.*
-import java.util.*
+import java.util.concurrent.atomic.AtomicInteger
 
 class BluetoothGattExplorer(
     private val context: Context,
@@ -18,31 +18,50 @@ class BluetoothGattExplorer(
 
     private val tag = "BluetoothGattExplorer"
     private var bluetoothGatt: BluetoothGatt? = null
-    private val handler = Handler(Looper.getMainLooper())
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    private val gattCallback = object : BluetoothGattCallback() {
+    private var isConnecting = false
+    private val retryCount = AtomicInteger(0)
+    private val maxRetries = 2
 
+    private val gattCallback = object : BluetoothGattCallback() {
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             Log.i(tag, "onConnectionStateChange: status=$status, newState=$newState")
+
             when (status) {
                 BluetoothGatt.GATT_SUCCESS -> {
-                    if (newState == BluetoothProfile.STATE_CONNECTED) {
-                        onProgress("Connected → Discovering services...")
-                        gatt.discoverServices()
-                    } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                        onProgress("Disconnected")
-                        close()
+                    when (newState) {
+                        BluetoothProfile.STATE_CONNECTED -> {
+                            retryCount.set(0)
+                            isConnecting = false
+                            onProgress("Connected → Discovering services...")
+                            gatt.discoverServices()
+                        }
+                        BluetoothProfile.STATE_DISCONNECTED -> {
+                            onProgress("Disconnected")
+                            close()
+                        }
                     }
                 }
-                147, BluetoothGatt.GATT_FAILURE, 133 -> { // Common failure codes
-                    onError(status, "Connection failed (Error $status). Device may be out of range or not connectable.")
-                    close()
-                }
                 else -> {
-                    onError(status, "Unknown GATT error: $status")
-                    close()
+                    val errorMsg = when (status) {
+                        147 -> "Connection timeout"
+                        133 -> "GATT error - device refused connection"
+                        else -> "GATT failure (code $status)"
+                    }
+
+                    if (retryCount.get() < maxRetries && status in listOf(147, 133)) {
+                        retryCount.incrementAndGet()
+                        onProgress("Retrying connection (${retryCount.get()}/$maxRetries)...")
+                        serviceScope.launch {
+                            delay(1500)
+                            reconnect(gatt.device)
+                        }
+                    } else {
+                        onError(status, "$errorMsg. Device may not support GATT connections.")
+                        close()
+                    }
                 }
             }
         }
@@ -50,78 +69,62 @@ class BluetoothGattExplorer(
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                onProgress("Services discovered. Reading characteristics...")
-                val services = gatt.services
-                val serviceList = mutableListOf<String>()
-                val characteristicData = mutableMapOf<Int, String>()
-
-                services.forEach { service ->
-                    val serviceName = service.uuid.toString().take(8)
-                    serviceList.add("Service: $serviceName (${service.characteristics.size} chars)")
-                    
-                    service.characteristics.forEach { char ->
-                        try {
-                            gatt.readCharacteristic(char)
-                            // Note: Real reading needs proper permission & queueing
-                        } catch (e: Exception) {}
-                    }
+                onProgress("Services discovered.")
+                val services = gatt.services.map { service ->
+                    "Service: ${service.uuid.toString().take(8)} (${service.characteristics.size} chars)"
                 }
-
-                onComplete(serviceList, characteristicData)
+                onComplete(services, emptyMap())
                 close()
             } else {
-                onError(status, "Service discovery failed: $status")
+                onError(status, "Service discovery failed")
                 close()
-            }
-        }
-
-        override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                val value = characteristic.value?.let { String(it) } ?: "Empty"
-                Log.d(tag, "Read: ${characteristic.uuid} → $value")
             }
         }
     }
 
-    fun connectAndExplore(device: BluetoothDevice, timeoutMs: Long = 15000) {
+    fun connectAndExplore(device: BluetoothDevice, timeoutMs: Long = 12000) {
         if (!hasConnectPermission()) {
-            onError(-1, "BLUETOOTH_CONNECT permission missing")
+            onError(-1, "Missing BLUETOOTH_CONNECT permission")
             return
         }
+        if (isConnecting) return
+
+        isConnecting = true
+        retryCount.set(0)
+        onProgress("Connecting to ${device.address}...")
+
+        connectGatt(device, timeoutMs)
+    }
+
+    private fun connectGatt(device: BluetoothDevice, timeoutMs: Long) {
+        bluetoothGatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
 
         serviceScope.launch {
-            try {
-                onProgress("Connecting to ${device.address}...")
-                
-                bluetoothGatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
-
-                // Safety timeout
-                delay(timeoutMs)
-                if (bluetoothGatt != null) {
-                    onError(147, "Connection timeout")
-                    close()
-                }
-            } catch (e: Exception) {
-                Log.e(tag, "GATT error", e)
-                onError(-1, e.localizedMessage ?: "Unknown error")
+            delay(timeoutMs)
+            if (isConnecting) {
+                onError(147, "Connection timeout")
                 close()
             }
         }
+    }
+
+    private fun reconnect(device: BluetoothDevice) {
+        close()
+        connectGatt(device, 10000)
     }
 
     private fun hasConnectPermission(): Boolean {
         return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == 
+            context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
         } else true
     }
 
     fun close() {
+        isConnecting = false
         try {
             bluetoothGatt?.close()
-            bluetoothGatt = null
-        } catch (e: Exception) {
-            Log.e(tag, "Error closing GATT", e)
-        }
+        } catch (e: Exception) {}
+        bluetoothGatt = null
     }
 }

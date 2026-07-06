@@ -184,6 +184,12 @@ fun BluetoothDetails(address: String, vm: DeviceDetailsViewModel, dashboardVm: D
                 ) {
                     Text("GATT EXPLORATION")
                 }
+                Text(
+                    text = "Note: GATT exploration only works on devices that advertise connectable services (many don't).",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -217,6 +223,16 @@ fun BluetoothDetails(address: String, vm: DeviceDetailsViewModel, dashboardVm: D
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (isError) Color.Red else Color.White
                             )
+
+                            if (dashboardVm.gattReport!!.contains("GATT Error") || dashboardVm.gattReport!!.contains("timeout")) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Many nearby devices do not support GATT exploration (especially randomized MACs).",
+                                    color = Color.Gray,
+                                    fontSize = 12.sp
+                                )
+                            }
+
                             if (isError) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(

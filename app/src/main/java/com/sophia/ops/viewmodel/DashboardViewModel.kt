@@ -646,40 +646,51 @@ class DashboardViewModel(
     fun startGattExploration(address: String) {
         val app = getApplication<Application>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (app.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            if (app.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != 
+                android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 gattReport = "Error: BLUETOOTH_CONNECT permission not granted."
                 return
             }
         }
 
         val bluetoothManager = app.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        val adapter = bluetoothManager.adapter
+        val adapter = bluetoothManager.adapter ?: run {
+            gattReport = "Bluetooth adapter unavailable"
+            return
+        }
         val remoteDevice = adapter.getRemoteDevice(address)
 
         isGattExploring = true
-        gattReport = "Preparing secure connection..."
+        gattReport = "🔄 Preparing GATT connection..."
 
         gattExplorer = BluetoothGattExplorer(
             context = app,
             onProgress = { msg ->
-                viewModelScope.launch(Dispatchers.Main) { gattReport = msg }
+                viewModelScope.launch(Dispatchers.Main) {
+                    gattReport = msg
+                }
             },
             onComplete = { services, _ ->
                 viewModelScope.launch(Dispatchers.Main) {
-                    gattReport = "GATT Exploration Complete:\n" + services.joinToString("\n")
+                    val summary = if (services.isEmpty()) {
+                        "No GATT services discovered."
+                    } else {
+                        services.take(8).joinToString("\n")
+                    }
+                    gattReport = "✅ GATT Exploration Complete\n\n$summary"
                     isGattExploring = false
                 }
             },
             onError = { code, msg ->
                 viewModelScope.launch(Dispatchers.Main) {
-                    gattReport = "GATT Error ($code): $msg"
+                    gattReport = "❌ $msg\n\nTip: Many devices (phones, headphones, etc.) do not allow GATT connections."
                     isGattExploring = false
                 }
             }
         )
 
         viewModelScope.launch(Dispatchers.Main) {
-            delay(500)
+            delay(600)
             gattExplorer?.connectAndExplore(remoteDevice)
         }
     }

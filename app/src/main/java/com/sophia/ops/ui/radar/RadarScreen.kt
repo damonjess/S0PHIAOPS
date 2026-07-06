@@ -778,6 +778,12 @@ fun RadarScreen(
                             ) {
                                 Text("EXPLORE GATT SERVICES")
                             }
+                            Text(
+                                text = "Note: Only works on connectable devices (many are not).",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray,
+                                modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                            )
                         } else {
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
