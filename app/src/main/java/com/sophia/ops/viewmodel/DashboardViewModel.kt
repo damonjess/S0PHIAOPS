@@ -142,6 +142,14 @@ class DashboardViewModel(
     var isScanning by mutableStateOf(value = false)
         private set
 
+    // Auto AI Analysis control
+    var autoAiAnalysisEnabled by mutableStateOf(false)
+        private set
+
+    fun toggleAutoAiAnalysis(enabled: Boolean) {
+        autoAiAnalysisEnabled = enabled
+    }
+
     private var isWifiScanning = false
     private var isBluetoothScanning = false
 
@@ -209,9 +217,6 @@ class DashboardViewModel(
 
     private val analysisInProgress = AtomicBoolean(false)
 
-    private var lastAnalyzedThreatScore: Int? = null
-    private var lastAnalysisTimestamp = 0L
-    private val minAnalysisInterval = 120_000L // 2 min cooldown unless something actually changed
     private val knownDeviceAddresses = mutableSetOf<String>()
 
     var strategicBrief by mutableStateOf<String?>(null)
@@ -424,9 +429,19 @@ class DashboardViewModel(
 
             val bleSummaries = snapshot.bluetoothDevices.map { dev ->
                 newAddressesSnapshot.add(dev.address)
+                val vendor = OuiLookup.getVendor(app, dev.address)
+                val displayName = when {
+                    !dev.nickname.isNullOrBlank() -> dev.nickname
+                    !dev.name.isNullOrBlank() && 
+                        !dev.name.startsWith("Discovered Device") && 
+                        !dev.name.contains("Unknown", ignoreCase = true) -> dev.name
+                    vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)" -> "$vendor Device"
+                    else -> "Unknown Bluetooth Device"
+                }
+
                 DeviceSummary(
-                    name = dev.nickname ?: dev.name ?: "Unknown Bluetooth Device",
-                    vendor = OuiLookup.getVendor(app, dev.address),
+                    name = displayName,
+                    vendor = vendor,
                     type = "BLUETOOTH",
                     riskScore = dev.riskScore,
                     isNew = dev.address !in knownDeviceAddresses
@@ -477,8 +492,6 @@ class DashboardViewModel(
                     strategicBrief = if (currentThreatScore > 70) result.recommendedAction else null
                 }
 
-                lastAnalyzedThreatScore = currentThreatScore
-                lastAnalysisTimestamp = System.currentTimeMillis()
                 knownDeviceAddresses.clear()
                 knownDeviceAddresses.addAll(newAddressesSnapshot)
             } else {
@@ -635,7 +648,9 @@ class DashboardViewModel(
                         services = banners.values.toList()
                     )
                     // Refresh UI lists...
-                    analyzeThreat()
+                    if (shouldTriggerAiAnalysis()) {
+                        analyzeThreat()
+                    }
                 }
             } finally {
                 isReconRunning = false
@@ -703,10 +718,12 @@ class DashboardViewModel(
         val baseAngle = (this.address.hashCode().toFloat() % 360f)
         val vendor = OuiLookup.getVendor(app, this.address)
         
-        val rawName = this.nickname ?: this.name
         val displayName = when {
-            !rawName.isNullOrBlank() && !rawName.startsWith("Discovered Device") && !rawName.contains("Unknown", true) -> rawName
-            vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)" -> vendor
+            !this.nickname.isNullOrBlank() -> this.nickname
+            !this.name.isNullOrBlank() && 
+                !this.name.startsWith("Discovered Device") && 
+                !this.name.contains("Unknown", ignoreCase = true) -> this.name
+            vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)" -> "$vendor Device"
             else -> "Unknown Bluetooth Device"
         }
 
@@ -884,13 +901,7 @@ class DashboardViewModel(
     }
 
     private fun shouldTriggerAiAnalysis(): Boolean {
-        val now = System.currentTimeMillis()
-        val currentScore = threatScore
-        val scoreDelta = lastAnalyzedThreatScore?.let { kotlin.math.abs(currentScore - it) } ?: Int.MAX_VALUE
-        val hasNewDevices = allRadarDevices.any { it.address !in knownDeviceAddresses }
-        val cooldownElapsed = (now - lastAnalysisTimestamp) >= minAnalysisInterval
-
-        return hasNewDevices || scoreDelta >= 5 || cooldownElapsed
+        return autoAiAnalysisEnabled
     }
 
     fun scan() {

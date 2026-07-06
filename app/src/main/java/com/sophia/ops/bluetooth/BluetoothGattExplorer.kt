@@ -59,7 +59,7 @@ class BluetoothGattExplorer(
                             reconnect(gatt.device)
                         }
                     } else {
-                        onError(status, "$errorMsg. Device may not support GATT connections.")
+                        onError(status, "$errorMsg. Many devices don't allow GATT connections.")
                         close()
                     }
                 }
@@ -70,9 +70,14 @@ class BluetoothGattExplorer(
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 onProgress("Services discovered.")
+
                 val services = gatt.services.map { service ->
-                    "Service: ${service.uuid.toString().take(8)} (${service.characteristics.size} chars)"
+                    val uuid = service.uuid.toString().lowercase()
+                    val shortUuid = uuid.take(8)
+                    val friendlyName = getServiceFriendlyName(uuid)
+                    "• $friendlyName ($shortUuid)"
                 }
+
                 onComplete(services, emptyMap())
                 close()
             } else {
@@ -118,6 +123,21 @@ class BluetoothGattExplorer(
             context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
         } else true
+    }
+
+    private fun getServiceFriendlyName(uuid: String): String {
+        return when {
+            uuid.startsWith("00001800") -> "Generic Access Profile"
+            uuid.startsWith("00001801") -> "Generic Attribute Profile"
+            uuid.startsWith("0000180a") -> "Device Information"
+            uuid.startsWith("0000180f") -> "Battery Service"
+            uuid.startsWith("0000180d") -> "Heart Rate Service"
+            uuid.startsWith("00001816") -> "Cycling Power"
+            uuid.startsWith("0000fe59") -> "Google Fast Pair"
+            uuid.startsWith("0000180a") -> "Device Information"
+            uuid.startsWith("14839ac4") -> "Custom Vendor Service"
+            else -> "Unknown Service"
+        }
     }
 
     fun close() {

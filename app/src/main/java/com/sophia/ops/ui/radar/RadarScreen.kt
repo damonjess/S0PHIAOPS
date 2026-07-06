@@ -35,6 +35,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
@@ -831,8 +832,21 @@ fun RadarScreen(
         }
 
         // AI Analyst Section
+        Spacer(modifier = Modifier.height(24.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Auto Cyber Analyst", style = MaterialTheme.typography.bodyLarge, color = Color.White)
+            Spacer(Modifier.weight(1f))
+            Switch(
+                checked = vm.autoAiAnalysisEnabled,
+                onCheckedChange = { vm.toggleAutoAiAnalysis(it) }
+            )
+        }
+
         if (vm.aiResponse != null || vm.isAnalyzing) {
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,

@@ -25,10 +25,14 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
     ) { bluetoothDevices, wifiNetworks ->
         val btList = bluetoothDevices.filter { !it.ignored }.map { entity ->
             val vendor = OuiLookup.getVendor(getApplication(), entity.address)
-            val rawName = entity.nickname ?: entity.name
+            
+            // Improved naming priority
             val displayName = when {
-                !rawName.isNullOrBlank() && !rawName.startsWith("Discovered Device") && !rawName.contains("Unknown", true) -> rawName
-                vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)" -> vendor
+                !entity.nickname.isNullOrBlank() -> entity.nickname
+                !entity.name.isNullOrBlank() && 
+                    !entity.name.startsWith("Discovered Device") && 
+                    !entity.name.contains("Unknown", ignoreCase = true) -> entity.name
+                vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)" -> "$vendor Device"
                 else -> "Unknown Bluetooth Device"
             }
 

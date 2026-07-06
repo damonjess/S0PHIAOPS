@@ -9,6 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.*
@@ -205,51 +206,53 @@ fun BluetoothDetails(address: String, vm: DeviceDetailsViewModel, dashboardVm: D
                 }
                 
                 if (dashboardVm.gattReport != null) {
+                    val gattReport = dashboardVm.gattReport!!
                     Spacer(modifier = Modifier.height(16.dp))
-                    val isError = dashboardVm.gattReport!!.startsWith("GATT Error") || 
-                                  dashboardVm.gattReport!!.startsWith("GATT Connection Failed") ||
-                                  dashboardVm.gattReport!!.startsWith("Error:")
-                    
-                    Text(if (isError) "GATT Error Details:" else "GATT Report:", style = MaterialTheme.typography.titleSmall, color = if (isError) Color.Red else Color.White)
                     Card(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp),
-                        colors = CardDefaults.cardColors(containerColor = if (isError) Color.Red.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.3f)),
-                        border = if (isError) BorderStroke(1.dp, Color.Red.copy(alpha = 0.5f)) else null
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.3f)),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
                     ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = dashboardVm.gattReport!!,
-                                modifier = Modifier.verticalScroll(rememberScrollState()),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (isError) Color.Red else Color.White
-                            )
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("GATT EXPLORATION", style = MaterialTheme.typography.titleMedium, color = Color(0xFF00E676))
+                            Spacer(modifier = Modifier.height(8.dp))
 
-                            if (dashboardVm.gattReport!!.contains("GATT Error") || dashboardVm.gattReport!!.contains("timeout")) {
+                            if (gattReport.contains("Complete")) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color.Green, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("GATT Exploration Complete", color = Color.Green, style = MaterialTheme.typography.bodySmall)
+                                }
+                                
+                                Text(
+                                    text = gattReport.lines().drop(1).joinToString("\n"),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier
+                                        .padding(vertical = 8.dp)
+                                        .verticalScroll(rememberScrollState()),
+                                    color = Color.White
+                                )
+                            } else if (gattReport.contains("❌") || gattReport.contains("timeout") || gattReport.contains("Error")) {
+                                Text(gattReport, color = Color.Red, style = MaterialTheme.typography.bodyMedium)
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = "Many nearby devices do not support GATT exploration (especially randomized MACs).",
-                                    color = Color.Gray,
-                                    fontSize = 12.sp
+                                    "Tip: Many devices (phones, earbuds, etc.) block GATT connections for privacy.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray
                                 )
+                            } else {
+                                Text(gattReport, style = MaterialTheme.typography.bodyMedium, color = Color.White)
                             }
 
-                            if (isError) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    "Common causes: Device out of range, not connectable, or needs pairing.",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color.White.copy(alpha = 0.7f)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Button(
-                                    onClick = { 
-                                        dashboardVm.exploreGatt(with(dashboardVm) { device.toNetworkDevice(context.applicationContext as android.app.Application) })
-                                    },
-                                    modifier = Modifier.align(Alignment.End),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.6f))
-                                ) {
-                                    Text("RE-EXPLORE", style = MaterialTheme.typography.labelSmall)
-                                }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Button(
+                                onClick = { 
+                                    dashboardVm.startGattExploration(address)
+                                },
+                                modifier = Modifier.align(Alignment.End),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.1f))
+                            ) {
+                                Text("RE-EXPLORE", style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }

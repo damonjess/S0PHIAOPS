@@ -3,46 +3,57 @@ package com.sophia.ops.ui.settings
 import android.app.ActivityManager
 import android.content.Context
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sophia.ops.services.ScanForegroundService
 import com.sophia.ops.viewmodel.DashboardViewModel
 
 @Composable
-fun SettingsScreen(vm: DashboardViewModel) {
+fun SettingsScreen(vm: DashboardViewModel = viewModel()) {
     val context = LocalContext.current
     var isBackgroundScanEnabled by remember {
         mutableStateOf(isServiceRunning(context, ScanForegroundService::class.java))
     }
 
-    Scaffold(
-        topBar = {
-            Text(
-                "Settings",
-                style = MaterialTheme.typography.headlineMedium,
-                modifier = Modifier.padding(16.dp)
-            )
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text(
+            text = "Settings",
+            style = MaterialTheme.typography.headlineMedium,
+            color = Color.White
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Background Scanning
+        Card(
+            modifier = Modifier.fillMaxWidth()
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text("Background Scanning", style = MaterialTheme.typography.titleLarge)
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Keep scanning for devices while the app is closed.",
+                        text = "Background Scanning",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = "Keep scanning for devices while the app is closed.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -59,45 +70,98 @@ fun SettingsScreen(vm: DashboardViewModel) {
                     }
                 )
             }
+        }
 
-            Spacer(modifier = Modifier.height(32.dp))
-            HorizontalDivider()
-            Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-            Text("AI Subsystem", style = MaterialTheme.typography.titleLarge)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (vm.isAiLoading) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                Text("Initializing cognitive core...", style = MaterialTheme.typography.labelSmall)
-            } else if (!vm.isAiReady) {
-                Button(
-                    onClick = { vm.activateOnDeviceAI() },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color(0xFF00BCD4))
-                ) {
-                    Text("INITIALIZE COGNITIVE AI CORE")
-                }
-                if (vm.aiInitializationFailed) {
+        // Auto Cyber Analyst
+        Card(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Last initialization failed. Check model weights in /data/local/tmp/",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.labelSmall
+                        text = "Auto Cyber Analyst",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = "Automatically analyze threats after scans",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-            } else {
-                Text(
-                    "Cognitive AI Core is active and monitoring.",
-                    color = androidx.compose.ui.graphics.Color.Green,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Text(
-                    "Status: ${vm.aiAdviceText}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                Switch(
+                    checked = vm.autoAiAnalysisEnabled,
+                    onCheckedChange = { vm.toggleAutoAiAnalysis(it) }
                 )
             }
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // AI Subsystem
+        Card(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = "AI Subsystem",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (vm.isAiLoading) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Color.Green)
+                    Text(
+                        "Initializing cognitive core...",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else if (!vm.isAiReady) {
+                    Button(
+                        onClick = { vm.activateOnDeviceAI() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BCD4))
+                    ) {
+                        Text("INITIALIZE COGNITIVE CORE")
+                    }
+                    if (vm.aiInitializationFailed) {
+                        Text(
+                            text = "Last initialization failed. Check model weights.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                } else {
+                    Text(
+                        "Cognitive AI Core is active and monitoring.",
+                        color = Color.Green,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        "Status: ${vm.aiAdviceText}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(
+            text = "More settings coming soon...",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
 
