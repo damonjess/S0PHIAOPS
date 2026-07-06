@@ -204,6 +204,21 @@ fun BluetoothDetails(address: String, vm: DeviceDetailsViewModel, dashboardVm: D
                 ) {
                     Text(if (dashboardVm.isReconRunning) "RECON IN PROGRESS..." else "DEEP RECON + PORT SCAN")
                 }
+
+                if (dashboardVm.reconStatus.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1B5E20).copy(alpha = 0.2f))
+                    ) {
+                        Text(
+                            text = dashboardVm.reconStatus,
+                            modifier = Modifier.padding(16.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White
+                        )
+                    }
+                }
                 
                 if (dashboardVm.gattReport != null) {
                     val gattReport = dashboardVm.gattReport!!
@@ -369,6 +384,21 @@ fun WifiDetails(address: String, vm: DeviceDetailsViewModel, dashboardVm: Dashbo
                     enabled = !dashboardVm.isReconRunning
                 ) {
                     Text(if (dashboardVm.isReconRunning) "RECON IN PROGRESS..." else "DEEP RECON + PORT SCAN")
+                }
+
+                if (dashboardVm.reconStatus.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1B5E20).copy(alpha = 0.2f))
+                    ) {
+                        Text(
+                            text = dashboardVm.reconStatus,
+                            modifier = Modifier.padding(16.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))

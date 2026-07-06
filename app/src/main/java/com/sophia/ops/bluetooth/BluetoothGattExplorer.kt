@@ -3,8 +3,6 @@ package com.sophia.ops.bluetooth
 import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicInteger
@@ -17,94 +15,78 @@ class BluetoothGattExplorer(
 ) {
 
     private val tag = "BluetoothGattExplorer"
-    private var bluetoothGatt: BluetoothGatt? = null
-    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-
+    private var gatt: BluetoothGatt? = null
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var isConnecting = false
-    private val retryCount = AtomicInteger(0)
-    private val maxRetries = 2
 
-    private val gattCallback = object : BluetoothGattCallback() {
+    private val callback = object : BluetoothGattCallback() {
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             Log.i(tag, "onConnectionStateChange: status=$status, newState=$newState")
-
-            when (status) {
-                BluetoothGatt.GATT_SUCCESS -> {
-                    when (newState) {
-                        BluetoothProfile.STATE_CONNECTED -> {
-                            retryCount.set(0)
-                            isConnecting = false
-                            onProgress("Connected → Discovering services...")
-                            gatt.discoverServices()
-                        }
-                        BluetoothProfile.STATE_DISCONNECTED -> {
-                            onProgress("Disconnected")
-                            close()
-                        }
-                    }
+            if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
+                onProgress("Connected → Discovering services...")
+                gatt.discoverServices()
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                onProgress("Disconnected")
+                close()
+            } else {
+                val errorMsg = when (status) {
+                    147 -> "Connection timeout"
+                    133 -> "GATT error - device refused connection"
+                    else -> "GATT failure (code $status)"
                 }
-                else -> {
-                    val errorMsg = when (status) {
-                        147 -> "Connection timeout"
-                        133 -> "GATT error - device refused connection"
-                        else -> "GATT failure (code $status)"
-                    }
-
-                    if (retryCount.get() < maxRetries && status in listOf(147, 133)) {
-                        retryCount.incrementAndGet()
-                        onProgress("Retrying connection (${retryCount.get()}/$maxRetries)...")
-                        serviceScope.launch {
-                            delay(1500)
-                            reconnect(gatt.device)
-                        }
-                    } else {
-                        onError(status, "$errorMsg. Many devices don't allow GATT connections.")
-                        close()
-                    }
-                }
+                onError(status, errorMsg)
+                close()
             }
         }
 
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                onProgress("Services discovered.")
-
-                val services = gatt.services.map { service ->
-                    val uuid = service.uuid.toString().lowercase()
-                    val shortUuid = uuid.take(8)
-                    val friendlyName = getServiceFriendlyName(uuid)
-                    "• $friendlyName ($shortUuid)"
+                onProgress("Services discovered. Reading device info...")
+                
+                val report = mutableListOf<String>()
+                gatt.services.forEach { service ->
+                    val serviceUuid = service.uuid.toString().lowercase()
+                    val serviceName = getServiceFriendlyName(serviceUuid)
+                    report.add("• $serviceName (${serviceUuid.take(8)})")
+                    
+                    service.characteristics.forEach { char ->
+                        val charUuid = char.uuid.toString().lowercase()
+                        val charName = getCharacteristicName(charUuid)
+                        val props = getPropertiesString(char.properties)
+                        report.add("  - $charName (${charUuid.take(8)}) [$props]")
+                    }
                 }
 
-                onComplete(services, emptyMap())
+                // To keep it simple and avoid async queue complexity, we'll complete here
+                // listing all found services and characteristics.
+                onComplete(report, emptyMap())
                 close()
             } else {
                 onError(status, "Service discovery failed")
                 close()
             }
         }
-    }
 
-    fun connectAndExplore(device: BluetoothDevice, timeoutMs: Long = 12000) {
-        if (!hasConnectPermission()) {
-            onError(-1, "Missing BLUETOOTH_CONNECT permission")
-            return
+        override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                val value = characteristic.value?.let { String(it, Charsets.UTF_8).trim() } ?: "N/A"
+                val name = getCharacteristicName(characteristic.uuid.toString().lowercase())
+                onProgress("$name: $value")
+            }
         }
-        if (isConnecting) return
-
-        isConnecting = true
-        retryCount.set(0)
-        onProgress("Connecting to ${device.address}...")
-
-        connectGatt(device, timeoutMs)
     }
 
-    private fun connectGatt(device: BluetoothDevice, timeoutMs: Long) {
-        bluetoothGatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+    @SuppressLint("MissingPermission")
+    fun connectAndExplore(device: BluetoothDevice, timeoutMs: Long = 12000) {
+        if (isConnecting) return
+        isConnecting = true
 
-        serviceScope.launch {
+        onProgress("Connecting to ${device.address}...")
+        gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
+        
+        scope.launch {
             delay(timeoutMs)
             if (isConnecting) {
                 onError(147, "Connection timeout")
@@ -113,38 +95,43 @@ class BluetoothGattExplorer(
         }
     }
 
-    private fun reconnect(device: BluetoothDevice) {
-        close()
-        connectGatt(device, 10000)
+    private fun getServiceFriendlyName(uuid: String): String = when {
+        uuid.startsWith("00001800") -> "Generic Access"
+        uuid.startsWith("00001801") -> "Generic Attribute"
+        uuid.startsWith("0000180a") -> "Device Information"
+        uuid.startsWith("0000180f") -> "Battery Service"
+        uuid.startsWith("0000180d") -> "Heart Rate"
+        uuid.startsWith("00001816") -> "Cycling Power"
+        uuid.startsWith("0000fe59") -> "Google Fast Pair"
+        else -> "Unknown Service"
     }
 
-    private fun hasConnectPermission(): Boolean {
-        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-        } else true
+    private fun getCharacteristicName(uuid: String): String = when {
+        uuid.startsWith("00002a00") -> "Device Name"
+        uuid.startsWith("00002a01") -> "Appearance"
+        uuid.startsWith("00002a19") -> "Battery Level"
+        uuid.startsWith("00002a24") -> "Model Number"
+        uuid.startsWith("00002a25") -> "Serial Number"
+        uuid.startsWith("00002a26") -> "Firmware Revision"
+        uuid.startsWith("00002a27") -> "Hardware Revision"
+        uuid.startsWith("00002a29") -> "Manufacturer Name"
+        else -> "Characteristic"
     }
-
-    private fun getServiceFriendlyName(uuid: String): String {
-        return when {
-            uuid.startsWith("00001800") -> "Generic Access Profile"
-            uuid.startsWith("00001801") -> "Generic Attribute Profile"
-            uuid.startsWith("0000180a") -> "Device Information"
-            uuid.startsWith("0000180f") -> "Battery Service"
-            uuid.startsWith("0000180d") -> "Heart Rate Service"
-            uuid.startsWith("00001816") -> "Cycling Power"
-            uuid.startsWith("0000fe59") -> "Google Fast Pair"
-            uuid.startsWith("0000180a") -> "Device Information"
-            uuid.startsWith("14839ac4") -> "Custom Vendor Service"
-            else -> "Unknown Service"
-        }
+    
+    private fun getPropertiesString(props: Int): String {
+        val list = mutableListOf<String>()
+        if (props and BluetoothGattCharacteristic.PROPERTY_READ != 0) list.add("R")
+        if (props and BluetoothGattCharacteristic.PROPERTY_WRITE != 0) list.add("W")
+        if (props and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) list.add("N")
+        if (props and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) list.add("I")
+        return list.joinToString(",")
     }
 
     fun close() {
         isConnecting = false
         try {
-            bluetoothGatt?.close()
+            gatt?.close()
         } catch (e: Exception) {}
-        bluetoothGatt = null
+        gatt = null
     }
 }

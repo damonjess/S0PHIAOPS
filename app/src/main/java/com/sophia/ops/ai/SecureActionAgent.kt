@@ -50,6 +50,7 @@ class SecureActionAgent(
             return AiAnalysisResult("Subsystem Standby.", "Core initialization pending.", "low")
         }
 
+        // Better prompt — avoids fixation on specific devices like Flipper Zero
         val prompt = """
 <start_of_turn>user
 SIGINT SITUATION REPORT
@@ -58,40 +59,36 @@ LOCAL ALERT: $primaryConcern
 THREAT LEVEL: $threatLevel/100
 
 TASK: 
-As SOPHIA, cross-reference the Local Alert with the Zone Context. 
-Provide a high-level technical implication and one tactical directive.
-Do not use conversational filler. Provide exactly two technical sentences.
+Provide a short, factual technical implication and one tactical recommendation.
+Focus only on the current alert. Do not repeat previous findings.
+Do not mention specific device models unless they are in the current alert.
+Respond with exactly two sentences.
 <end_of_turn>
 <start_of_turn>model
 Analysis:""".trimIndent()
 
         return try {
             val raw = inference.generateResponse(prompt)
-            Log.d(tag, "AI Raw: $raw")
             
-            // Clean up model output aggressively
             val cleaned = raw.substringAfter("Analysis:")
-                .replace(Regex("(?i)okay,.*"), "")
-                .replace(Regex("(?i)sure,.*"), "")
-                .replace(Regex("(?i)directive:"), "")
+                .replace(Regex("(?i)flipper zero|flipperzero", RegexOption.IGNORE_CASE), "BLE device")
+                .replace(Regex("(?i)okay,|sure,|well,"), "")
                 .replace(Regex("\\*\\*"), "")
-                .replace(Regex("\\\\n"), " ")
-                .replace(Regex("\\n"), " ")
-                .replace(Regex("\\s+"), " ")
+                .replace(Regex("\\n+"), " ")
                 .trim()
 
-            val sentences = cleaned.split(Regex("(?<=[.!?])\\s+"))
-            val summary = sentences.getOrNull(0) ?: "Target signature identified in environment."
-            val action = sentences.drop(1).joinToString(" ").ifBlank { "Maintain current monitoring posture." }
+            val sentences = cleaned.split(Regex("(?<=[.!?])\\s+")).filter { it.isNotBlank() }
+            val summary = sentences.getOrNull(0) ?: "Target signature identified."
+            val action = sentences.getOrNull(1) ?: "Continue passive monitoring."
 
             AiAnalysisResult(
-                summary.take(200), 
-                action.take(150), 
-                if (threatLevel > 50) "high" else "medium"
+                summary.take(220),
+                action.take(160),
+                if (threatLevel > 60) "high" else "medium"
             )
         } catch (t: Throwable) {
             Log.e(tag, "Assessment failed", t)
-            AiAnalysisResult("Strategic analysis suspended.", "Monitor logs for anomalies.", "low")
+            AiAnalysisResult("Analysis temporarily unavailable.", "Maintain current monitoring posture.", "low")
         }
     }
 

@@ -720,7 +720,7 @@ fun RadarScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "RECON IN PROGRESS...",
+                                    text = vm.reconStatus ?: "RECON IN PROGRESS...",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Color(0xFF673AB7)
                                 )
@@ -861,6 +861,11 @@ fun RadarScreen(
                 
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     TextButton(
+                        onClick = { vm.refreshGlobalAnalysis() }
+                    ) {
+                        Text("RESET", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+                    }
+                    TextButton(
                         onClick = { vm.analyzeThreat() },
                         enabled = !vm.isAnalyzing
                     ) {
@@ -899,7 +904,7 @@ fun RadarScreen(
                         }
                     } else {
                         Text(
-                            text = vm.aiResponse ?: "",
+                            text = vm.aiResponse ?: vm.cyberAnalystContext,
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color.White
                         )

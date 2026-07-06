@@ -171,6 +171,12 @@ class DashboardViewModel(
     var aiResponse by mutableStateOf<String?>(null)
         private set
 
+    var cyberAnalystContext by mutableStateOf("Fresh environment scan in progress.")
+        private set
+
+    var lastGlobalAnalysis by mutableStateOf("")
+        private set
+
     @Volatile
     private var tacticalAgent: SecureActionAgent? = null 
 
@@ -199,6 +205,9 @@ class DashboardViewModel(
         private set
 
     var isReconRunning by mutableStateOf(false)
+        private set
+
+    var reconStatus by mutableStateOf("")
         private set
 
     var gattReport by mutableStateOf<String?>(null)
@@ -541,7 +550,9 @@ class DashboardViewModel(
 
                 withContext(Dispatchers.Main) {
                     aiAdviceText = "🌐 GLOBAL INTEL: ${result.recommendedAction}"
-                    aiResponse = "INTELLIGENCE SYNTHESIS: ${result.riskSummary} ${result.recommendedAction}"
+                    val response = "INTELLIGENCE SYNTHESIS: ${result.riskSummary} ${result.recommendedAction}"
+                    aiResponse = response
+                    lastGlobalAnalysis = response
                     isAnalyzing = false
                 }
             }
@@ -626,31 +637,69 @@ class DashboardViewModel(
 
     fun performFullRecon(device: NetworkDevice) {
         if (isReconRunning) return
+
         viewModelScope.launch(Dispatchers.IO) {
             isReconRunning = true
+            withContext(Dispatchers.Main) {
+                reconStatus = "🔍 Starting Deep Recon on ${device.name}..."
+            }
+
             try {
-                // Try to get IP via ARP or assume from subnet if on same LAN
-                val ip = device.ipAddress.ifBlank { "192.168.1.${device.address.takeLast(2).toIntOrNull(16) ?: 100}" }
+                // Get or guess IP
+                val ip = if (device.ipAddress.isNotBlank() && device.ipAddress != "Unknown") {
+                    device.ipAddress
+                } else {
+                    "192.168.1.${device.address.takeLast(2).toIntOrNull(16) ?: 100}"
+                }
+
+                withContext(Dispatchers.Main) {
+                    reconStatus = "📡 Scanning common ports on $ip..."
+                }
 
                 val openPorts = PentestRecon.quickPortScan(ip)
                 val banners = mutableMapOf<Int, String>()
-                openPorts.take(5).forEach { p ->
-                    PentestRecon.grabBanner(ip, p)?.let { banners[p] = it }
-                }
-                val os = PentestRecon.guessOS(openPorts, banners)
 
                 withContext(Dispatchers.Main) {
-                    // Update device in lists
-                    val updated = device.copy(
+                    reconStatus = "📋 Reading banners from ${openPorts.size} open ports..."
+                }
+
+                openPorts.take(6).forEach { port ->
+                    PentestRecon.grabBanner(ip, port)?.let { banner ->
+                        banners[port] = banner
+                    }
+                }
+
+                val osGuess = PentestRecon.guessOS(openPorts, banners)
+
+                withContext(Dispatchers.Main) {
+                    val updatedDevice = device.copy(
                         ipAddress = ip,
                         openPorts = openPorts,
-                        osGuess = os,
+                        osGuess = osGuess,
                         services = banners.values.toList()
                     )
-                    // Refresh UI lists...
+                    
+                    if (selectedRadarDevice?.address == device.address) {
+                        selectedRadarDevice = updatedDevice
+                    }
+
+                    reconStatus = """
+                        ✅ Deep Recon Complete
+                        
+                        IP: $ip
+                        Open Ports: ${openPorts.joinToString(", ")}
+                        OS Guess: $osGuess
+                        ${if (banners.isNotEmpty()) "\nBanners:\n" + banners.map { "${it.key} → ${it.value.take(60)}" }.joinToString("\n") else ""}
+                    """.trimIndent()
+
+                    // Refresh UI lists / AI if needed
                     if (shouldTriggerAiAnalysis()) {
                         analyzeThreat()
                     }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    reconStatus = "❌ Recon failed: ${e.localizedMessage ?: "Unknown error"}"
                 }
             } finally {
                 isReconRunning = false
@@ -898,6 +947,15 @@ class DashboardViewModel(
     fun stopAutoRefresh() {
         autoRefreshJob?.cancel()
         autoRefreshJob = null
+    }
+
+    fun refreshGlobalAnalysis() {
+        // Clear any stuck context
+        cyberAnalystContext = "Fresh environment scan in progress."
+        lastGlobalAnalysis = ""
+        aiResponse = null
+        aiAdviceText = "AI Engine Standby. Click to initialize."
+        // Trigger new analysis if needed
     }
 
     private fun shouldTriggerAiAnalysis(): Boolean {
