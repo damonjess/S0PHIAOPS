@@ -23,7 +23,6 @@ import com.sophia.ops.bluetooth.BluetoothRiskEngine
 import com.sophia.ops.wifi.RiskEngine
 import com.sophia.ops.wifi.WifiScanner
 import com.sophia.ops.model.NetworkDevice
-import com.sophia.ops.model.DeviceType
 import com.sophia.ops.ai.SecureActionAgent
 import com.sophia.ops.ai.DeviceSummary
 import com.sophia.ops.recon.PentestRecon
@@ -43,6 +42,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -78,6 +79,16 @@ class DashboardViewModel(
     var autoAiAnalysisEnabled: Boolean
         get() = _autoAiAnalysisEnabled.value
         private set(value) { _autoAiAnalysisEnabled.value = value }
+
+    private val _isRadarAutoRotating = mutableStateOf(true)
+    var isRadarAutoRotating: Boolean
+        get() = _isRadarAutoRotating.value
+        private set(value) { _isRadarAutoRotating.value = value }
+
+    private val _isRadarLabelsVisible = mutableStateOf(true)
+    var isRadarLabelsVisible: Boolean
+        get() = _isRadarLabelsVisible.value
+        private set(value) { _isRadarLabelsVisible.value = value }
 
     private val _isWifiScanning = mutableStateOf(false)
     private var isWifiScanning: Boolean
@@ -244,6 +255,11 @@ class DashboardViewModel(
     private var lastScanRequestTime = 0L
     private val minScanInterval = 15000L
 
+    private val _isAutoScanEnabled = MutableStateFlow(false)
+    val isAutoScanEnabled: StateFlow<Boolean> = _isAutoScanEnabled.asStateFlow()
+
+    private var autoScanJob: Job? = null
+
     @Volatile
     private var tacticalAgent: SecureActionAgent? = null 
 
@@ -258,6 +274,12 @@ class DashboardViewModel(
         viewModelScope.launch {
             try {
                 autoAiAnalysisEnabled = prefs.getBoolean("auto_ai_enabled", true)
+                isRadarAutoRotating = prefs.getBoolean("radar_auto_rotate", true)
+                isRadarLabelsVisible = prefs.getBoolean("radar_labels_visible", true)
+                val isAutoScan = prefs.getBoolean("auto_scan_enabled", false)
+                _isAutoScanEnabled.value = isAutoScan
+                if (isAutoScan) startAutoScanLoop()
+                
                 pruneData()
                 preloadOuiDatabase()
                 startAiRequestObserver()
@@ -269,9 +291,46 @@ class DashboardViewModel(
         }
     }
 
+    fun toggleAutoScan(enabled: Boolean) {
+        _isAutoScanEnabled.value = enabled
+        prefs.edit().putBoolean("auto_scan_enabled", enabled).apply()
+        if (enabled) {
+            startAutoScanLoop()
+        } else {
+            stopAutoScanLoop()
+        }
+    }
+
+    private fun startAutoScanLoop() {
+        autoScanJob?.cancel()
+        autoScanJob = viewModelScope.launch {
+            while (isActive && _isAutoScanEnabled.value) {
+                if (!isScanning) {
+                    scan()
+                }
+                delay(8000)
+            }
+        }
+    }
+
+    private fun stopAutoScanLoop() {
+        autoScanJob?.cancel()
+        autoScanJob = null
+    }
+
     fun toggleAutoAiAnalysis(enabled: Boolean) {
         autoAiAnalysisEnabled = enabled
         prefs.edit().putBoolean("auto_ai_enabled", enabled).apply()
+    }
+
+    fun toggleRadarAutoRotation(enabled: Boolean) {
+        isRadarAutoRotating = enabled
+        prefs.edit().putBoolean("radar_auto_rotate", enabled).apply()
+    }
+
+    fun toggleRadarLabels(visible: Boolean) {
+        isRadarLabelsVisible = visible
+        prefs.edit().putBoolean("radar_labels_visible", visible).apply()
     }
 
     private fun checkModelExists() {
@@ -676,18 +735,22 @@ class DashboardViewModel(
             val agent = tacticalAgent
             if (agent != null) {
                 try {
+                    // Try to find more details from the source lists
+                    val wifiMatch = networks.find { it.bssid == device.macAddress }
+                    val btMatch = bluetoothDevices.find { it.address == device.macAddress }
+                    
                     val result = agent.analyzeDevice(
                         name = device.name,
-                        address = device.address,
-                        vendor = device.vendor,
-                        type = device.type.name,
-                        signal = device.signal,
-                        timesSeen = device.timesSeen,
-                        riskScore = device.riskScore.toInt(),
-                        ipAddress = device.ipAddress,
-                        openPorts = device.openPorts,
-                        services = device.services,
-                        osGuess = device.osGuess
+                        address = device.macAddress,
+                        vendor = if (btMatch != null) OuiLookup.getVendor(getApplication(), btMatch.address) else "Unknown",
+                        type = if (device.isBluetooth) "BLUETOOTH" else "WIFI",
+                        signal = device.dBm,
+                        timesSeen = btMatch?.timesSeen ?: 1,
+                        riskScore = btMatch?.riskScore ?: wifiMatch?.riskScore ?: 0,
+                        ipAddress = "Unknown",
+                        openPorts = emptyList(),
+                        services = emptyList(),
+                        osGuess = null
                     )
                     withContext(Dispatchers.Main) {
                         deepScanResult = result
@@ -717,8 +780,9 @@ class DashboardViewModel(
             reconStatus = "🔍 Starting Deep Recon on ${device.name}..."
 
             try {
-                val targetIp = device.ipAddress.takeIf { it != "Unknown" && it.isNotBlank() }
-                    ?: "192.168.1.${Math.abs(device.address.hashCode() % 250) + 1}"
+                // Since ipAddress is gone from NetworkDevice, we use a placeholder or try to infer it.
+                // In a real app, you'd need a way to map MAC to IP.
+                val targetIp = "192.168.1.${Math.abs(device.macAddress.hashCode() % 250) + 1}"
 
                 reconStatus = "📡 Scanning common ports on $targetIp..."
 
@@ -802,11 +866,11 @@ class DashboardViewModel(
     }
 
     fun exploreGatt(device: NetworkDevice) {
-        startGattExploration(device.address)
+        startGattExploration(device.macAddress)
     }
 
     fun BluetoothDeviceEntity.toNetworkDevice(app: Application): NetworkDevice {
-        val baseAngle = (this.address.hashCode().toFloat() % 360f)
+        val baseAngle = (this.address.hashCode().toFloat().let { if (it < 0) -it else it } % 360f)
         val vendor = OuiLookup.getVendor(app, this.address)
         
         val displayName = when {
@@ -818,25 +882,22 @@ class DashboardViewModel(
             else -> "Unknown Bluetooth Device"
         }
 
+        // Calculate distance percentage: 0 is center (strongest), 100 is edge (weakest)
+        val distFactor = ((this.rssi.toFloat() + 105f) / 125f).coerceIn(0.15f, 0.9f)
+        val distancePercent = (1f - distFactor) * 100f
+
         return NetworkDevice(
-            id = this.address,
             name = displayName,
-            address = this.address,
-            vendor = vendor,
-            type = DeviceType.BLUETOOTH,
-            signal = this.rssi,
-            favourite = this.favourite,
-            lastSeen = this.lastSeen,
-            firstSeen = this.firstSeen,
-            riskScore = this.riskScore,
-            timesSeen = this.timesSeen,
-            threatScore = this.riskScore.toFloat(),
-            radarAngle = baseAngle,
+            macAddress = this.address,
+            angle = baseAngle,
+            distancePercent = distancePercent,
+            dBm = this.rssi,
+            isBluetooth = true
         )
     }
 
     fun WifiNetwork.toNetworkDevice(app: Application): NetworkDevice {
-        val baseAngle = (this.bssid.hashCode().toFloat() % 360f)
+        val baseAngle = (this.bssid.hashCode().toFloat().let { if (it < 0) -it else it } % 360f)
         val vendor = OuiLookup.getVendor(app, this.bssid)
         
         val displayName = if (this.ssid.isBlank() || this.ssid == "<unknown ssid>") {
@@ -849,20 +910,16 @@ class DashboardViewModel(
             this.ssid
         }
 
+        val distFactor = ((this.signal.toFloat() + 105f) / 125f).coerceIn(0.15f, 0.9f)
+        val distancePercent = (1f - distFactor) * 100f
+
         return NetworkDevice(
-            id = this.bssid,
             name = displayName,
-            address = this.bssid,
-            vendor = vendor,
-            type = DeviceType.WIFI,
-            signal = this.signal,
-            favourite = false,
-            lastSeen = this.timestamp,
-            firstSeen = this.timestamp,
-            riskScore = this.riskScore,
-            timesSeen = 1,
-            threatScore = this.riskScore.toFloat(),
-            radarAngle = baseAngle + this.angularOffset
+            macAddress = this.bssid,
+            angle = (baseAngle + this.angularOffset) % 360f,
+            distancePercent = distancePercent,
+            dBm = this.signal,
+            isBluetooth = false
         )
     }
 
@@ -1270,6 +1327,7 @@ class DashboardViewModel(
     override fun onCleared() {
         super.onCleared()
         stopAutoRefresh()
+        stopAutoScanLoop()
         
         // Execute teardown on the dedicated AI thread to maintain thread affinity
         aiScope.launch {

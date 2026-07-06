@@ -1,27 +1,10 @@
 package com.sophia.ops.model
 
 data class NetworkDevice(
-    val id: String,
     val name: String,
-    val address: String,
-    val vendor: String? = null,
-    val type: DeviceType,
-    val signal: Int,
-    val favourite: Boolean = false,
-    val lastSeen: Long = System.currentTimeMillis(),
-    val firstSeen: Long = lastSeen,
-    val riskScore: Int = 0,
-    val timesSeen: Int = 1,
-    val threatScore: Float = riskScore.toFloat(),
-    val radarAngle: Float = 0f,
-    val ipAddress: String = "Unknown",
-    val openPorts: List<Int> = emptyList(),      // NEW
-    val osGuess: String? = null,                 // NEW
-    val services: List<String> = emptyList(),    // NEW  e.g. "HTTP", "SSH"
-    val status: String = "Active"
+    val macAddress: String,
+    val angle: Float,            // 0f to 360f
+    val distancePercent: Float,  // 0f to 100f (clamped radius)
+    val dBm: Int,                // Signal strength (e.g., -65)
+    val isBluetooth: Boolean     // True for BT, False for Wi-Fi
 )
-
-enum class DeviceType {
-    WIFI,
-    BLUETOOTH
-}

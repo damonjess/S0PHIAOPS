@@ -20,6 +20,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.runtime.collectAsState
 import com.sophia.ops.ui.dashboard.DashboardScreen
 import com.sophia.ops.ui.devices.DeviceDetailsScreen
 import com.sophia.ops.ui.devices.DevicesScreen
@@ -109,7 +110,7 @@ fun AppNavigation(
                     vm = devicesVm,
                     dashboardVm = viewModel,
                     onDeviceClick = { device ->
-                        navController.navigate("device_details/${device.type}/${device.address}")
+                        navController.navigate("device_details/${if (device.isBluetooth) "BT" else "WIFI"}/${device.macAddress}")
                     }
                 )
             }
@@ -123,7 +124,7 @@ fun AppNavigation(
             }
             composable(Routes.DEVICE_DETAILS) { backStackEntry ->
                 val address = backStackEntry.arguments?.getString("address") ?: ""
-                val device = viewModel.allRadarDevices.find { it.address == address }
+                val device = viewModel.allRadarDevices.find { it.macAddress == address }
                 
                 if (device != null) {
                     DeviceDetailsScreen(

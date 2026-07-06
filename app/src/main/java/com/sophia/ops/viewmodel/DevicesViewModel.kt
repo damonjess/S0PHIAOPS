@@ -5,7 +5,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sophia.ops.data.db.SophiaDatabase
 import com.sophia.ops.data.OuiLookup
-import com.sophia.ops.model.DeviceType
 import com.sophia.ops.model.NetworkDevice
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -35,15 +34,16 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
                 else -> "Unknown Bluetooth Device"
             }
 
+            val distFactor = ((entity.rssi.toFloat() + 105f) / 125f).coerceIn(0.15f, 0.9f)
+            val distancePercent = (1f - distFactor) * 100f
+
             NetworkDevice(
-                id = entity.address,
                 name = displayName,
-                address = entity.address,
-                vendor = vendor,
-                type = DeviceType.BLUETOOTH,
-                signal = entity.rssi,
-                favourite = entity.favourite,
-                lastSeen = entity.lastSeen
+                macAddress = entity.address,
+                angle = (entity.address.hashCode().toFloat().let { if (it < 0) -it else it } % 360f),
+                distancePercent = distancePercent,
+                dBm = entity.rssi,
+                isBluetooth = true
             )
         }
 
@@ -59,19 +59,20 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
                 network.ssid
             }
 
+            val distFactor = ((network.signal.toFloat() + 105f) / 125f).coerceIn(0.15f, 0.9f)
+            val distancePercent = (1f - distFactor) * 100f
+
             NetworkDevice(
-                id = network.bssid,
                 name = displayName,
-                address = network.bssid,
-                vendor = vendor,
-                type = DeviceType.WIFI,
-                signal = network.signal,
-                favourite = false,
-                lastSeen = network.timestamp
+                macAddress = network.bssid,
+                angle = (network.bssid.hashCode().toFloat().let { if (it < 0) -it else it } % 360f),
+                distancePercent = distancePercent,
+                dBm = network.signal,
+                isBluetooth = false
             )
         }
 
-        (btList + wifiList).sortedByDescending { it.lastSeen }
+        (btList + wifiList).sortedByDescending { it.dBm }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -86,25 +87,28 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun toggleFavourite(device: NetworkDevice) {
-        if (device.type == DeviceType.BLUETOOTH) {
+        if (device.isBluetooth) {
             viewModelScope.launch {
-                bluetoothDao.updateFavourite(device.address, !device.favourite)
+                val entity = bluetoothDao.getDeviceByAddress(device.macAddress)
+                entity?.let {
+                    bluetoothDao.updateFavourite(it.address, !it.favourite)
+                }
             }
         }
     }
 
     fun updateNickname(device: NetworkDevice, nickname: String?) {
-        if (device.type == DeviceType.BLUETOOTH) {
+        if (device.isBluetooth) {
             viewModelScope.launch {
-                bluetoothDao.updateNickname(device.address, nickname)
+                bluetoothDao.updateNickname(device.macAddress, nickname)
             }
         }
     }
 
     fun toggleIgnored(device: NetworkDevice) {
-        if (device.type == DeviceType.BLUETOOTH) {
+        if (device.isBluetooth) {
             viewModelScope.launch {
-                bluetoothDao.updateIgnored(device.address, true)
+                bluetoothDao.updateIgnored(device.macAddress, true)
             }
         }
     }

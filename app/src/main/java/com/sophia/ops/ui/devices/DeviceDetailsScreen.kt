@@ -25,14 +25,14 @@ fun DeviceDetailsScreen(
             text = device.name,
             style = MaterialTheme.typography.headlineMedium
         )
-        Text(device.address, color = Color.Gray)
-        Text("Signal: ${device.signal}dBm | Vendor: ${device.vendor}")
+        Text(device.macAddress, color = Color.Gray)
+        Text("Signal: ${device.dBm}dBm")
 
         Spacer(modifier = Modifier.height(24.dp))
 
         // DEEP SCAN TARGET
         Button(
-            onClick = { },
+            onClick = { viewModel.performDeepScan(device) },
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00B8D4))
         ) {
@@ -54,7 +54,7 @@ fun DeviceDetailsScreen(
 
         // GATT EXPLORATION
         Button(
-            onClick = { viewModel.startGattExploration(device.address) },
+            onClick = { viewModel.startGattExploration(device.macAddress) },
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
         ) {

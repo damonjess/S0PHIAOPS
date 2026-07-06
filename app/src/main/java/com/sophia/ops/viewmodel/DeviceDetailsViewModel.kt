@@ -4,7 +4,6 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sophia.ops.data.db.SophiaDatabase
-import com.sophia.ops.model.DeviceType
 import com.sophia.ops.model.NetworkDevice
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map

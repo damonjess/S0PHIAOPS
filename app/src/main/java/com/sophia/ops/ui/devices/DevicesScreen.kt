@@ -20,9 +20,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
-import com.sophia.ops.model.DeviceType
 import com.sophia.ops.model.NetworkDevice
+import androidx.compose.material.icons.automirrored.filled.Sort
 import com.sophia.ops.data.OuiLookup
 import com.sophia.ops.viewmodel.DevicesViewModel
 
@@ -265,13 +266,11 @@ fun DevicesContent(
                     val query = searchText.trim()
                     val matchesSearch = query.isEmpty() ||
                             device.name.contains(query, ignoreCase = true) ||
-                            device.address.contains(query, ignoreCase = true) ||
-                            device.vendor?.contains(query, ignoreCase = true) == true
+                            device.macAddress.contains(query, ignoreCase = true)
 
                     val matchesFilter = when(filter) {
-                        "Favourite" -> device.favourite
-                        "Wi-Fi" -> device.type == DeviceType.WIFI
-                        "Bluetooth" -> device.type == DeviceType.BLUETOOTH
+                        "Wi-Fi" -> !device.isBluetooth
+                        "Bluetooth" -> device.isBluetooth
                         "Unknown" -> device.name.contains("Unknown", ignoreCase = true) || device.name.isBlank()
                         else -> true
                     }
@@ -280,12 +279,10 @@ fun DevicesContent(
                 }
 
                 val sortedDevices = when (sortOption) {
-                    "Newest" -> filteredDevices.sortedByDescending { it.lastSeen }
-                    "Oldest" -> filteredDevices.sortedBy { it.lastSeen }
+                    "Strongest Signal" -> filteredDevices.sortedByDescending { it.dBm }
+                    "Weakest Signal" -> filteredDevices.sortedBy { it.dBm }
                     "Name A-Z" -> filteredDevices.sortedBy { it.name }
                     "Name Z-A" -> filteredDevices.sortedByDescending { it.name }
-                    "Strongest Signal" -> filteredDevices.sortedByDescending { it.signal }
-                    "Weakest Signal" -> filteredDevices.sortedBy { it.signal }
                     else -> filteredDevices
                 }
 
@@ -368,7 +365,7 @@ fun DeviceItem(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                    DeviceIcon(device.name, device.type)
+                    DeviceIcon(device.name, device.isBluetooth)
                     Spacer(Modifier.width(12.dp))
                     Text(
                         text = device.name,
@@ -377,19 +374,11 @@ fun DeviceItem(
                         maxLines = 1
                     )
                 }
-                if (device.favourite) {
-                    Icon(
-                        imageVector = Icons.Default.Star,
-                        contentDescription = "Favourite",
-                        tint = Color.Yellow,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val typeIcon = if (device.type == DeviceType.WIFI) "📶" else "🔵"
-                val typeName = if (device.type == DeviceType.WIFI) "Wi-Fi" else "Bluetooth"
+                val typeIcon = if (!device.isBluetooth) "📶" else "🔵"
+                val typeName = if (!device.isBluetooth) "Wi-Fi" else "Bluetooth"
 
                 Text(
                     text = "$typeIcon $typeName",
@@ -400,7 +389,7 @@ fun DeviceItem(
                 
                 Spacer(modifier = Modifier.width(16.dp))
 
-                val signalPercent = (2 * (device.signal + 100)).coerceIn(0, 100)
+                val signalPercent = (2 * (device.dBm + 100)).coerceIn(0, 100)
                 val signalColor = when {
                     signalPercent > 70 -> Color.Green
                     signalPercent > 40 -> Color.Yellow
@@ -417,50 +406,11 @@ fun DeviceItem(
 
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = "MAC: ${device.address}",
+                    text = "MAC: ${device.macAddress}",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.LightGray
                 )
-
-                val context = LocalContext.current
-                val cleanVendorName = remember(device.address) {
-                    OuiLookup.getVendor(context, device.address)
-                }
-
-                Text(
-                    text = "Vendor: $cleanVendorName",
-                    color = Color(0xFF00BCD4),
-                    style = MaterialTheme.typography.bodyMedium
-                )
             }
-
-            if (device.openPorts.isNotEmpty()) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.2f)),
-                    border = BorderStroke(1.dp, Color(0xFF673AB7).copy(alpha = 0.3f))
-                ) {
-                    Column(modifier = Modifier.padding(8.dp)) {
-                        Text(
-                            text = "Recon: ${device.osGuess ?: "Unknown OS"}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF673AB7),
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Ports: ${device.openPorts.joinToString(", ")}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White
-                        )
-                    }
-                }
-            }
-
-            Text(
-                text = "Last Seen: ${DateUtils.getRelativeTimeSpanString(device.lastSeen)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.Gray
-            )
         }
     }
 }
