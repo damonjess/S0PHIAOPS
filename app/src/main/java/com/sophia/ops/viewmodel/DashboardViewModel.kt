@@ -24,6 +24,8 @@ import com.sophia.ops.model.NetworkDevice
 import com.sophia.ops.model.DeviceType
 import com.sophia.ops.ai.SecureActionAgent
 import com.sophia.ops.ai.DeviceSummary
+import com.sophia.ops.recon.PentestRecon
+import com.sophia.ops.bluetooth.BluetoothGattExplorer
 import android.util.Log
 import android.annotation.SuppressLint
 import androidx.lifecycle.viewModelScope
@@ -186,6 +188,17 @@ class DashboardViewModel(
 
     var isDeepScanning by mutableStateOf(false)
         private set
+
+    var isReconRunning by mutableStateOf(false)
+        private set
+
+    var gattReport by mutableStateOf<String?>(null)
+        private set
+
+    var isGattExploring by mutableStateOf(false)
+        private set
+
+    private val gattExplorer = BluetoothGattExplorer(application)
 
     var deepScanResult by mutableStateOf<String?>(null)
         private set
@@ -571,7 +584,11 @@ class DashboardViewModel(
                         type = device.type.name,
                         signal = device.signal,
                         timesSeen = device.timesSeen,
-                        riskScore = device.riskScore.toInt()
+                        riskScore = device.riskScore.toInt(),
+                        ipAddress = device.ipAddress,
+                        openPorts = device.openPorts,
+                        services = device.services,
+                        osGuess = device.osGuess
                     )
                     withContext(Dispatchers.Main) {
                         deepScanResult = result
@@ -593,7 +610,57 @@ class DashboardViewModel(
         }
     }
 
-    private fun BluetoothDeviceEntity.toNetworkDevice(app: Application): NetworkDevice {
+    fun performFullRecon(device: NetworkDevice) {
+        if (isReconRunning) return
+        viewModelScope.launch(Dispatchers.IO) {
+            isReconRunning = true
+            try {
+                // Try to get IP via ARP or assume from subnet if on same LAN
+                val ip = device.ipAddress.ifBlank { "192.168.1.${device.address.takeLast(2).toIntOrNull(16) ?: 100}" }
+
+                val openPorts = PentestRecon.quickPortScan(ip)
+                val banners = mutableMapOf<Int, String>()
+                openPorts.take(5).forEach { p ->
+                    PentestRecon.grabBanner(ip, p)?.let { banners[p] = it }
+                }
+                val os = PentestRecon.guessOS(openPorts, banners)
+
+                withContext(Dispatchers.Main) {
+                    // Update device in lists
+                    val updated = device.copy(
+                        ipAddress = ip,
+                        openPorts = openPorts,
+                        osGuess = os,
+                        services = banners.values.toList()
+                    )
+                    // Refresh UI lists...
+                    analyzeThreat()
+                }
+            } finally {
+                isReconRunning = false
+            }
+        }
+    }
+
+    fun exploreGatt(device: NetworkDevice) {
+        val bluetoothManager = getApplication<Application>().getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val adapter = bluetoothManager.adapter
+        val remoteDevice = adapter.getRemoteDevice(device.address)
+
+        isGattExploring = true
+        gattReport = "Initializing GATT connection..."
+        
+        gattExplorer.explore(remoteDevice) { result ->
+            viewModelScope.launch(Dispatchers.Main) {
+                gattReport = result
+                if (result == "Disconnected." || result.startsWith("GATT Error") || result.startsWith("GATT Services")) {
+                    isGattExploring = false
+                }
+            }
+        }
+    }
+
+    fun BluetoothDeviceEntity.toNetworkDevice(app: Application): NetworkDevice {
         val baseAngle = (this.address.hashCode().toFloat() % 360f)
         val vendor = OuiLookup.getVendor(app, this.address)
         
@@ -621,7 +688,7 @@ class DashboardViewModel(
         )
     }
 
-    private fun WifiNetwork.toNetworkDevice(app: Application): NetworkDevice {
+    fun WifiNetwork.toNetworkDevice(app: Application): NetworkDevice {
         val baseAngle = (this.bssid.hashCode().toFloat() % 360f)
         val vendor = OuiLookup.getVendor(app, this.bssid)
         

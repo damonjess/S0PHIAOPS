@@ -135,6 +135,7 @@ fun AppNavigation(
                     type = type,
                     address = address,
                     vm = detailsVm,
+                    dashboardVm = viewModel,
                     onBack = { navController.popBackStack() }
                 )
             }

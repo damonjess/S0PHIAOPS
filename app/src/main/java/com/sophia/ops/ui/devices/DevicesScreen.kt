@@ -1,6 +1,7 @@
 package com.sophia.ops.ui.devices
 
 import android.text.format.DateUtils
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -431,6 +432,28 @@ fun DeviceItem(
                     color = Color(0xFF00BCD4),
                     style = MaterialTheme.typography.bodyMedium
                 )
+            }
+
+            if (device.openPorts.isNotEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.2f)),
+                    border = BorderStroke(1.dp, Color(0xFF673AB7).copy(alpha = 0.3f))
+                ) {
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        Text(
+                            text = "Recon: ${device.osGuess ?: "Unknown OS"}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF673AB7),
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Ports: ${device.openPorts.joinToString(", ")}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White
+                        )
+                    }
+                }
             }
 
             Text(

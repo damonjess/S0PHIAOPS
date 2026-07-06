@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -687,6 +688,135 @@ fun RadarScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color.White
                                 )
+                            }
+                        }
+                    }
+
+                    // Deep Recon Section
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    if (!vm.isReconRunning && device.openPorts.isEmpty()) {
+                        Button(
+                            onClick = { vm.performFullRecon(device) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF673AB7))
+                        ) {
+                            Text("DEEP RECON (PORT SCAN)")
+                        }
+                    } else if (vm.isReconRunning) {
+                         Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.3f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Color(0xFF673AB7)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "RECON IN PROGRESS...",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF673AB7)
+                                )
+                            }
+                        }
+                    } else if (device.openPorts.isNotEmpty()) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.3f)),
+                            border = BorderStroke(1.dp, Color(0xFF673AB7).copy(alpha = 0.5f))
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = "RECON RESULTS",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF673AB7),
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "OS Guess: ${device.osGuess ?: "Unknown"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = "Open Ports: ${device.openPorts.joinToString(", ")}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White
+                                )
+                                if (device.services.isNotEmpty()) {
+                                    Text(
+                                        text = "Services: ${device.services.joinToString(", ")}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.White
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                TextButton(
+                                    onClick = { vm.performFullRecon(device) },
+                                    modifier = Modifier.align(Alignment.End)
+                                ) {
+                                    Text("RE-SCAN", color = Color(0xFF673AB7))
+                                }
+                            }
+                        }
+                    }
+
+                    // GATT Exploration Section
+                    if (device.type == com.sophia.ops.model.DeviceType.BLUETOOTH) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        if (vm.gattReport == null && !vm.isGattExploring) {
+                            Button(
+                                onClick = { vm.exploreGatt(device) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91E63))
+                            ) {
+                                Text("EXPLORE GATT SERVICES")
+                            }
+                        } else {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.3f)),
+                                border = BorderStroke(1.dp, Color(0xFFE91E63).copy(alpha = 0.5f))
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (vm.isGattExploring) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(14.dp),
+                                                strokeWidth = 2.dp,
+                                                color = Color(0xFFE91E63)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                        }
+                                        Text(
+                                            text = "GATT EXPLORATION",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFFE91E63),
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = vm.gattReport ?: "",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.White,
+                                        modifier = Modifier.heightIn(max = 200.dp).verticalScroll(rememberScrollState())
+                                    )
+                                    if (!vm.isGattExploring) {
+                                        TextButton(
+                                            onClick = { vm.exploreGatt(device) },
+                                            modifier = Modifier.align(Alignment.End)
+                                        ) {
+                                            Text("RE-EXPLORE", color = Color(0xFFE91E63))
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

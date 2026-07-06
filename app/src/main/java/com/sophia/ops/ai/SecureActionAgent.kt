@@ -103,7 +103,11 @@ Analysis:""".trimIndent()
         type: String,
         signal: Int,
         timesSeen: Int,
-        riskScore: Int
+        riskScore: Int,
+        ipAddress: String,
+        openPorts: List<Int>,
+        services: List<String>,
+        osGuess: String?
     ): String {
         val factualPrefix = if (vendor == "Private Address (Randomized)") {
             "This is a randomized privacy MAC address, common on modern smartphones — it changes periodically and cannot be traced to a specific manufacturer. "
@@ -123,11 +127,15 @@ Analysis:""".trimIndent()
 <start_of_turn>user
 Device: "$name" ($type)
 $vendorLine
+IP: $ipAddress
+Open Ports: ${openPorts.joinToString()}
+Services: ${services.joinToString()}
+OS Guess: $osGuess
 Signal strength: ${signal}dBm
 Times seen: $timesSeen
 Risk score: $riskScore/100
 
-In one plain sentence, comment on whether this specific device looks ordinary or worth keeping an eye on, referencing at least one concrete detail above (its name, vendor, how often it's been seen, or its risk score).
+In one plain sentence, comment on whether this specific device looks ordinary or worth keeping an eye on, referencing at least one concrete detail above (its name, vendor, open ports, OS guess, or risk score).
 Only use the facts given above. Do not invent radio/technical terms (e.g. do not mention spectral density, modulation, or similar) that were not provided.
 <end_of_turn>
 <start_of_turn>model

@@ -15,6 +15,9 @@ data class NetworkDevice(
     val threatScore: Float = riskScore.toFloat(),
     val radarAngle: Float = 0f,
     val ipAddress: String = "Unknown",
+    val openPorts: List<Int> = emptyList(),      // NEW
+    val osGuess: String? = null,                 // NEW
+    val services: List<String> = emptyList(),    // NEW  e.g. "HTTP", "SSH"
     val status: String = "Active"
 )
 
