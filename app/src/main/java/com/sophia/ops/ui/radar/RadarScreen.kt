@@ -33,7 +33,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.layout.Arrangement
@@ -43,7 +45,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -544,6 +548,9 @@ fun RadarScreen(
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            AskSophiaCard(vm)
         }
 
         // Device Timeline / Detail Card Section
@@ -842,5 +849,48 @@ fun LegendItem(label: String, color: Color) {
         }
         Spacer(modifier = Modifier.width(4.dp))
         Text(text = label, style = MaterialTheme.typography.labelSmall, color = Color.White)
+    }
+}
+
+@Composable
+fun AskSophiaCard(vm: DashboardViewModel) {
+    var questionText by remember { mutableStateOf("") }
+
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Ask SOPHIA", style = MaterialTheme.typography.titleMedium, color = Color(0xFF4CAF50))
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = questionText,
+                onValueChange = { questionText = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("e.g. Is it safe to use public Wi-Fi?", color = Color.Gray) },
+                enabled = !vm.isChatLoading,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White)
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Button(
+                onClick = {
+                    vm.askSophia(questionText)
+                    questionText = ""
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !vm.isChatLoading && questionText.isNotBlank() && vm.isAiReady,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+            ) {
+                Text(if (vm.isChatLoading) "Thinking..." else "Ask")
+            }
+
+            vm.chatAnswer?.let { answer ->
+                Spacer(Modifier.height(12.dp))
+                Text(answer, style = MaterialTheme.typography.bodyMedium, color = Color.White)
+            }
+        }
     }
 }

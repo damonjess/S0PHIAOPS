@@ -95,6 +95,7 @@ Analysis:""".trimIndent()
         }
     }
 
+    @Synchronized
     fun analyzeDevice(
         name: String,
         address: String,
@@ -104,43 +105,88 @@ Analysis:""".trimIndent()
         timesSeen: Int,
         riskScore: Int
     ): String {
-        val inference = llmInference
-        if (inference == null || isClosed) return "Tactical AI Unavailable."
+        val factualPrefix = if (vendor == "Private Address (Randomized)") {
+            "This is a randomized privacy MAC address, common on modern smartphones — it changes periodically and cannot be traced to a specific manufacturer. "
+        } else {
+            ""
+        }
+
+        val inference = llmInference ?: return factualPrefix + "AI engine unavailable for further analysis."
+
+        val vendorLine = if (!vendor.isNullOrBlank() && vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)") {
+            "Vendor: $vendor"
+        } else {
+            "Vendor: unknown"
+        }
 
         val prompt = """
 <start_of_turn>user
-[TASK]
-Identify likely device class and operational intent for this electronic signature. 
-Do not repeat the target data. Provide exactly 2 short technical sentences.
+Device: "$name" ($type)
+$vendorLine
+Signal strength: ${signal}dBm
+Times seen: $timesSeen
+Risk score: $riskScore/100
 
-[DATA]
-Target: $name ($address)
-Vendor: ${vendor ?: "Unknown"}
-RSSI: ${signal}dBm / RISK: $riskScore
+In one plain sentence, comment on whether this specific device looks ordinary or worth keeping an eye on, referencing at least one concrete detail above (its name, vendor, how often it's been seen, or its risk score).
+Only use the facts given above. Do not invent radio/technical terms (e.g. do not mention spectral density, modulation, or similar) that were not provided.
 <end_of_turn>
 <start_of_turn>model
-Analysis:""".trimIndent()
+""".trimIndent()
 
         return try {
             val raw = inference.generateResponse(prompt)
-            val output = raw.substringAfter("Analysis:")
-                .replace(Regex("(?i)okay,.*"), "")
-                .replace(Regex("(?i)sure,.*"), "")
-                .replace(Regex("\\*\\*"), "")
-                .replace(Regex("\\\\n"), " ")
-                .replace(Regex("\\n"), " ")
-                .replace(Regex("\\s+"), " ")
-                .trim()
-            
-            if (output.length < 10) {
-                "Signature analysis complete. Target categorized as $type device with $riskScore% threat probability."
-            } else {
-                output
-            }
+            factualPrefix + sanitizeAdvice(raw)
         } catch (t: Throwable) {
             Log.e(tag, "Device analysis failed", t)
-            "Analysis failed: ${t.localizedMessage ?: t.javaClass.simpleName}"
+            factualPrefix + "Verdict unavailable due to an analysis error."
         }
+    }
+
+    private fun sanitizeAdvice(raw: String): String {
+        return raw.substringAfter("Analysis:")
+            .replace(Regex("(?i)okay,.*"), "")
+            .replace(Regex("(?i)sure,.*"), "")
+            .replace(Regex("\\*\\*"), "")
+            .replace(Regex("\\\\n"), " ")
+            .replace(Regex("\\n"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    @Synchronized
+    fun askQuestion(question: String, environmentContext: String): String {
+        val inference = llmInference
+        if (inference == null || isClosed) return "AI engine not active. Please initialize it first."
+
+        val prompt = """
+<start_of_turn>user
+You are SOPHIA, a network security assistant embedded in a scanning app.
+Current environment: $environmentContext
+
+Answer the user's question in 2-3 plain sentences. Only mention the environment info above if it's actually relevant to the question — otherwise just answer generally. Do not use markdown, labels, or bullet points.
+
+Question: $question
+<end_of_turn>
+<start_of_turn>model
+""".trimIndent()
+
+        return try {
+            val raw = inference.generateResponse(prompt)
+            sanitizeChatResponse(raw)
+        } catch (t: Throwable) {
+            Log.e(tag, "Chat question failed", t)
+            "Sorry, I couldn't process that question: ${t.localizedMessage ?: t.javaClass.simpleName}"
+        }
+    }
+
+    private fun sanitizeChatResponse(raw: String): String {
+        return raw
+            .replace(Regex("<.*?>"), "")
+            .replace(Regex("\\*\\*"), "")
+            .replace(Regex("\\n+"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .ifBlank { "I don't have a good answer for that right now." }
     }
 
     fun close() {

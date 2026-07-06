@@ -203,6 +203,12 @@ class DashboardViewModel(
     var strategicBrief by mutableStateOf<String?>(null)
         private set
 
+    var chatAnswer by mutableStateOf<String?>(null)
+        private set
+
+    var isChatLoading by mutableStateOf(false)
+        private set
+
     fun activateOnDeviceAI() {
         if (tacticalAgent != null || isAiLoading) return
         
@@ -338,6 +344,29 @@ class DashboardViewModel(
         aiRequestChannel.trySend(Unit)
     }
 
+    fun askSophia(question: String) {
+        if (question.isBlank() || isChatLoading) return
+
+        val agent = tacticalAgent
+        if (agent == null) {
+            chatAnswer = "AI engine not active. Tap 'Activate AI' first."
+            return
+        }
+
+        isChatLoading = true
+        aiScope.launch(exceptionHandler) {
+            val totalCount = networks.size + bluetoothDevices.size
+            val environmentContext = "Threat score ${threatScore}/100, $totalCount devices currently tracked."
+
+            chatAnswer = try {
+                agent.askQuestion(question, environmentContext)
+            } catch (t: Throwable) {
+                "Error: ${t.localizedMessage ?: t.javaClass.simpleName}"
+            }
+            isChatLoading = false
+        }
+    }
+
     private suspend fun processAiAnalysis() {
         if (!analysisInProgress.compareAndSet(false, true)) {
             Log.i(tag, "processAiAnalysis() skipped - already in progress.")
@@ -402,15 +431,22 @@ class DashboardViewModel(
                 else              -> "Low-Noise / Isolated Perimeter"
             }
 
+            val topDeviceNames = allSummaries.take(3).joinToString(", ") { d ->
+                if (d.vendor.isNotBlank() && d.vendor != "Unknown Vendor" && !d.vendor.startsWith("Private"))
+                    "${d.name} (${d.vendor})" else d.name
+            }.ifBlank { "no notable devices" }
+
+            val newDeviceCount = allSummaries.count { it.isNew }
+
             val primaryConcern = when {
-                topThreat != null && topThreat.riskScore > 70 -> 
+                topThreat != null && topThreat.riskScore > 70 ->
                     "High-risk signature detected: ${topThreat.name} (${topThreat.vendor}, Risk ${topThreat.riskScore})."
-                newThreats.isNotEmpty() -> 
-                    "${newThreats.size} new suspicious devices identified in proximity."
-                currentThreatScore > 50 -> 
-                    "Elevated environmental threat level ($currentThreatScore/100)."
-                else -> 
-                    "Ambient scan baseline established with $totalCount active nodes."
+                newThreats.isNotEmpty() ->
+                    "${newThreats.size} new suspicious device(s) identified: ${newThreats.take(3).joinToString(", ") { it.name }}."
+                currentThreatScore > 50 ->
+                    "Elevated environmental threat level ($currentThreatScore/100). Notable devices: $topDeviceNames."
+                else ->
+                    "Scan of $totalCount device(s) complete — $newDeviceCount new since last check. Notable nearby: $topDeviceNames."
             }
 
             Log.d(tag, "Executing AI analysis on thread: ${Thread.currentThread().name}")
