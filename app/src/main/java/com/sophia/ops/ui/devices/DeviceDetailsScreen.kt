@@ -49,11 +49,12 @@ fun DeviceDetailsScreen(
 
                 // DEEP SCAN TARGET
                 Button(
-                    onClick = { /* TODO: Implement full deep scan */ },
+                    onClick = { viewModel.performDeepScan(device) },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00B8D4))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00B8D4)),
+                    enabled = !viewModel.isDeepScanning
                 ) {
-                    Text("DEEP SCAN TARGET")
+                    Text(if (viewModel.isDeepScanning) "ANALYZING..." else "DEEP SCAN TARGET")
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -64,9 +65,10 @@ fun DeviceDetailsScreen(
                         viewModel.performFullRecon(device)
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8E24AA))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8E24AA)),
+                    enabled = !viewModel.isReconRunning
                 ) {
-                    Text("DEEP RECON (PORT SCAN)")
+                    Text(if (viewModel.isReconRunning) "RECON IN PROGRESS..." else "DEEP RECON (PORT SCAN)")
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -77,30 +79,52 @@ fun DeviceDetailsScreen(
                         viewModel.startGattExploration(device.address)
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
+                    enabled = !viewModel.isGattExploring
                 ) {
-                    Text("GATT EXPLORATION")
+                    Text(if (viewModel.isGattExploring) "EXPLORING GATT..." else "GATT EXPLORATION")
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Status areas
+                if (viewModel.deepScanResult != null) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF00B8D4).copy(alpha = 0.2f))
+                    ) {
+                        Text(
+                            text = viewModel.deepScanResult!!,
+                            modifier = Modifier.padding(16.dp),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
                 if (viewModel.reconStatus.isNotEmpty()) {
-                    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1B5E20).copy(alpha = 0.3f))) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1B5E20).copy(alpha = 0.3f))
+                    ) {
                         Text(
                             text = viewModel.reconStatus,
                             modifier = Modifier.padding(16.dp),
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
 
                 if (!viewModel.gattReport.isNullOrEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF263238))) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF263238))
+                    ) {
                         Text(
                             text = viewModel.gattReport!!,
-                            modifier = Modifier.padding(16.dp)
+                            modifier = Modifier.padding(16.dp),
+                            style = MaterialTheme.typography.bodySmall
                         )
                     }
                 }
