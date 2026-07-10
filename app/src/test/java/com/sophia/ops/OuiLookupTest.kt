@@ -6,7 +6,7 @@ import com.sophia.ops.data.OuiLookup
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
-import org.mockito.ArgumentMatchers.anyString
+import org.mockito.ArgumentMatchers.eq
 import org.mockito.Mock
 import org.mockito.Mockito.`when`
 import org.mockito.MockitoAnnotations
@@ -29,7 +29,7 @@ class OuiLookupTest {
     @Test
     fun `test getVendor returns correct vendor for known MAC`() {
         val json = """{"000C29": "VMware, Inc.", "0005CD": "Apple, Inc."}"""
-        `when`(assetManager.open(anyString())).thenReturn(ByteArrayInputStream(json.toByteArray()))
+        `when`(assetManager.open(eq("oui_database.json"))).thenReturn(ByteArrayInputStream(json.toByteArray()))
 
         val vendor = OuiLookup.getVendor(context, "00:0C:29:12:34:56")
         assertEquals("VMware, Inc.", vendor)
@@ -38,7 +38,7 @@ class OuiLookupTest {
     @Test
     fun `test getVendor returns Unknown Vendor for unknown MAC`() {
         val json = """{"000C29": "VMware, Inc."}"""
-        `when`(assetManager.open(anyString())).thenReturn(ByteArrayInputStream(json.toByteArray()))
+        `when`(assetManager.open(eq("oui_database.json"))).thenReturn(ByteArrayInputStream(json.toByteArray()))
 
         val vendor = OuiLookup.getVendor(context, "AA:BB:CC:DD:EE:FF")
         assertEquals("Unknown Vendor", vendor)
