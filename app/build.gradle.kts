@@ -62,4 +62,8 @@ dependencies {
 
     // On-device LLM inference for local text generation
     implementation("com.google.mediapipe:tasks-genai:0.10.35")
+
+    // Testing with Mockito
+    testImplementation("org.mockito.kotlin:mockito-kotlin:5.1.0")
+    testImplementation("org.mockito:mockito-core:5.1.1")
 }
