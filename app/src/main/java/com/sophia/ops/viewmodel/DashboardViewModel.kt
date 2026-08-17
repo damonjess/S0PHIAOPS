@@ -400,22 +400,26 @@ class DashboardViewModel(
             val wifiSummaries = snapshot.networks.map { net ->
                 newAddressesSnapshot.add(net.bssid)
                 DeviceSummary(
+                    address = net.bssid,
                     name = net.ssid.ifBlank { "Hidden Network" },
                     vendor = OuiLookup.getVendor(app, net.bssid),
                     type = "WIFI",
                     riskScore = net.riskScore,
-                    isNew = net.bssid !in knownDeviceAddresses
+                    isNew = net.bssid !in knownDeviceAddresses,
+                    signal = net.signal
                 )
             }
 
             val bleSummaries = snapshot.bluetoothDevices.map { dev ->
                 newAddressesSnapshot.add(dev.address)
                 DeviceSummary(
+                    address = dev.address,
                     name = dev.nickname ?: dev.name ?: "Unknown Bluetooth Device",
                     vendor = OuiLookup.getVendor(app, dev.address),
                     type = "BLUETOOTH",
                     riskScore = dev.riskScore,
-                    isNew = dev.address !in knownDeviceAddresses
+                    isNew = dev.address !in knownDeviceAddresses,
+                    signal = dev.rssi
                 )
             }
 

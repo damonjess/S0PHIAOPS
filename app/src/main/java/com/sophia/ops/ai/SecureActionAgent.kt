@@ -51,11 +51,24 @@ class SecureActionAgent(
             else -> "No action needed — continue routine monitoring."
         }
 
-        return AiAnalysisResult(
-            riskSummary = primaryConcern,
+        val severity = when {
+            threatLevel > 70 -> AssessmentSeverity.HIGH
+            threatLevel > 30 -> AssessmentSeverity.MEDIUM
+            else -> AssessmentSeverity.LOW
+        }
+        val conf = if (threatLevel > 50) AssessmentConfidence.HIGH else AssessmentConfidence.MEDIUM
+
+        val assessment = AiAssessment(
+            severity = severity,
+            confidence = conf,
+            headline = primaryConcern,
+            evidence = emptyList(),
+            changes = emptyList(),
+            uncertainty = "Analyzed by tactical heuristic agent.",
             recommendedAction = action,
-            confidence = if (threatLevel > 50) "high" else "medium"
+            requiresConfirmation = threatLevel > 70
         )
+        return AiAnalysisResult(assessment)
     }
 
     @Synchronized
