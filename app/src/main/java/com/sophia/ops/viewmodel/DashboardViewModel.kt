@@ -15,6 +15,13 @@ import com.sophia.ops.data.entities.BluetoothDeviceEntity
 import com.sophia.ops.data.entities.ScanSession
 import com.sophia.ops.data.entities.SignalPoint
 import com.sophia.ops.data.OuiLookup
+import com.sophia.ops.data.DeviceDisposition
+import com.sophia.ops.data.InvestigationStore
+import com.sophia.ops.data.DailyBrief
+import com.sophia.ops.data.IncidentRecord
+import com.sophia.ops.data.RiskTuning
+import com.sophia.ops.data.RiskTuningStore
+import com.sophia.ops.alerts.LocalAlertNotifier
 import com.sophia.ops.data.db.SophiaDatabase
 import com.sophia.ops.bluetooth.BluetoothScanner
 import com.sophia.ops.bluetooth.BluetoothRiskEngine
@@ -24,6 +31,9 @@ import com.sophia.ops.model.NetworkDevice
 import com.sophia.ops.model.DeviceType
 import com.sophia.ops.ai.SecureActionAgent
 import com.sophia.ops.ai.DeviceSummary
+import com.sophia.ops.ai.AiAssessment
+import com.sophia.ops.ai.AssessmentEvidence
+import com.sophia.ops.ai.ScanChange
 import android.util.Log
 import android.annotation.SuppressLint
 import androidx.lifecycle.viewModelScope
@@ -36,6 +46,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -44,6 +55,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
 import java.io.File
 import java.io.FileOutputStream
+import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -52,6 +64,7 @@ import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.math.abs
 import kotlin.random.Random
 import kotlin.jvm.Volatile
 
@@ -71,7 +84,7 @@ class DashboardViewModel(
     
     // Channel for debouncing AI requests. CONFLATED ensures we only process the LATEST
     // request if multiple scans finish while the AI is busy.
-    private val aiRequestChannel = Channel<Unit>(Channel.CONFLATED)
+    private val aiRequestChannel = Channel<Boolean>(Channel.CONFLATED)
 
     private data class ScanDataSnapshot(
         val networks: List<WifiNetwork>,
@@ -91,9 +104,44 @@ class DashboardViewModel(
     
     private val scanner = WifiScanner(application)
     private val bluetoothScanner = BluetoothScanner(application)
+    private val radarPreferences = application.getSharedPreferences("radar_preferences", Context.MODE_PRIVATE)
+    private val investigationStore = InvestigationStore(application)
+    private val localAlertNotifier = LocalAlertNotifier(application)
+    private val riskTuningStore = RiskTuningStore(application)
+
+    var radarAutoRotate by mutableStateOf(radarPreferences.getBoolean("radar_auto_rotate", false))
+        private set
+    var radarLabelsEnabled by mutableStateOf(radarPreferences.getBoolean("radar_labels_enabled", true))
+        private set
+    var signalHistoryVisible by mutableStateOf(radarPreferences.getBoolean("signal_history_visible", true))
+        private set
+    var signalHistoryLimit by mutableStateOf(radarPreferences.getInt("signal_history_limit", 6).coerceIn(3, 12))
+        private set
+    var radarRangeMultiplier by mutableStateOf(radarPreferences.getFloat("radar_range_multiplier", 1f).coerceIn(0.75f, 1.50f))
+        private set
+    var autoAnalystEnabled by mutableStateOf(radarPreferences.getBoolean("auto_analyst_enabled", false))
+        private set
+    var scanIntervalMillis by mutableStateOf(radarPreferences.getLong("scan_interval_millis", 15_000L).coerceIn(15_000L, 60_000L))
+        private set
+    var continuousScanningEnabled by mutableStateOf(radarPreferences.getBoolean("continuous_scanning_enabled", false))
+        private set
+    var deviceDispositions by mutableStateOf(investigationStore.loadDispositions())
+        private set
+    var riskTuning by mutableStateOf(riskTuningStore.load())
+        private set
+    var inDeviceAlertsEnabled by mutableStateOf(radarPreferences.getBoolean("in_device_alerts_enabled", true))
+        private set
+    var alertCooldownMillis by mutableStateOf(radarPreferences.getLong("alert_cooldown_millis", 15 * 60_000L).coerceIn(5 * 60_000L, 60 * 60_000L))
+        private set
+    var dailyBrief by mutableStateOf(investigationStore.buildDailyBrief())
+        private set
+    var lastAlertStatus by mutableStateOf("No local alert has been sent in this session.")
+        private set
+    private var lastAlertTimestamp = radarPreferences.getLong("last_local_alert_timestamp", 0L)
     
     init {
         pruneData()
+        observePersistedBluetoothSignals()
         preloadOuiDatabase()
         startAiRequestObserver()
         checkModelExists()
@@ -113,8 +161,8 @@ class DashboardViewModel(
         aiScope.launch(exceptionHandler) {
             while (isActive) {
                 try {
-                    aiRequestChannel.receive()
-                    processAiAnalysis()
+                    val fromLiveScan = aiRequestChannel.receive()
+                    processAiAnalysis(fromLiveScan)
                 } catch (e: Exception) {
                     if (isActive) Log.e(tag, "AI observer error", e)
                 }
@@ -135,6 +183,27 @@ class DashboardViewModel(
             Log.i(tag, "Automated Cleanup: Dropped unverified/low-risk signals older than 24 hours.")
         }
     }
+
+    /**
+     * Hydrates the live radar from Room as well as from new discovery callbacks.
+     * This keeps the radar history panel populated after an app restart or a
+     * background scan completed while the radar screen was not open.
+     */
+    private fun observePersistedBluetoothSignals() {
+        viewModelScope.launch(Dispatchers.IO) {
+            bluetoothDao.getAll().collectLatest { storedDevices ->
+                val visibleDevices = storedDevices.filterNot { it.ignored }
+                withContext(Dispatchers.Main) {
+                    bluetoothDevices.clear()
+                    bluetoothDevices.addAll(visibleDevices)
+                    selectedDevice?.address?.let { selectedAddress ->
+                        selectedDevice = visibleDevices.firstOrNull { it.address == selectedAddress }
+                        selectedRadarDevice = selectedDevice?.toNetworkDevice(getApplication())
+                    }
+                }
+            }
+        }
+    }
     
     var isScanning by mutableStateOf(value = false)
         private set
@@ -146,7 +215,7 @@ class DashboardViewModel(
     private var lastAutoRefreshInterval: Long = 5000L
     
     private var lastScanRequestTime = 0L
-    private val minScanInterval = 15000L // Increased to 15s to reduce pressure during AI generation
+    private var scanCanceledByUser = false
 
     val networks = mutableStateListOf<WifiNetwork>()
     val bluetoothDevices = mutableStateListOf<BluetoothDeviceEntity>()
@@ -158,6 +227,9 @@ class DashboardViewModel(
         private set
 
     var aiResponse by mutableStateOf<String?>(null)
+        private set
+
+    var aiAssessment by mutableStateOf<AiAssessment?>(null)
         private set
 
     @Volatile
@@ -199,6 +271,7 @@ class DashboardViewModel(
     private var lastAnalysisTimestamp = 0L
     private val minAnalysisInterval = 120_000L // 2 min cooldown unless something actually changed
     private val knownDeviceAddresses = mutableSetOf<String>()
+    private val previousSignalByAddress = mutableMapOf<String, Int>()
 
     var strategicBrief by mutableStateOf<String?>(null)
         private set
@@ -276,55 +349,78 @@ class DashboardViewModel(
         viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
             withContext(Dispatchers.Main) {
                 isDownloading = true
-                aiAdviceText = "Downloading Tactical Engine (approx 1.2GB)..."
+                aiAdviceText = "Downloading local AI model securely…"
                 downloadProgress = 0f
             }
-            
+
             val targetFile = File(getApplication<Application>().filesDir, "model.task")
+            val temporaryFile = File(getApplication<Application>().filesDir, "model.task.download")
+            var connection: HttpURLConnection? = null
             try {
                 val url = URL(modelUrl)
-                val connection = url.openConnection()
-                connection.connect()
-                
-                val fileLength = connection.contentLength
-                val input = url.openStream()
-                val output = FileOutputStream(targetFile)
-                
-                val data = ByteArray(16384)
-                var total: Long = 0
-                var count: Int
-                while (input.read(data).also { count = it } != -1) {
-                    total += count
-                    if (fileLength > 0) {
-                        withContext(Dispatchers.Main) {
-                            downloadProgress = total.toFloat() / fileLength.toFloat()
-                        }
-                    }
-                    output.write(data, 0, count)
+                require(url.protocol.equals("https", ignoreCase = true)) { "Model download must use HTTPS." }
+                if (temporaryFile.exists()) temporaryFile.delete()
+
+                val httpConnection = (url.openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 20_000
+                    readTimeout = 30_000
+                    instanceFollowRedirects = true
+                    requestMethod = "GET"
+                    connect()
                 }
-                
-                output.flush()
-                output.close()
-                input.close()
-                
+                connection = httpConnection
+                require(httpConnection.responseCode in 200..299) { "Model server returned HTTP ${httpConnection.responseCode}." }
+                val fileLength = httpConnection.contentLengthLong
+                require(fileLength > 0L) { "Model server did not provide a valid file length." }
+
+                httpConnection.inputStream.use { input ->
+                    FileOutputStream(temporaryFile).use { output ->
+                        val buffer = ByteArray(32 * 1024)
+                        var total = 0L
+                        var read: Int
+                        var lastReportedPercent = -1
+                        while (input.read(buffer).also { read = it } != -1) {
+                            output.write(buffer, 0, read)
+                            total += read
+                            val percent = ((total * 100L) / fileLength).toInt().coerceIn(0, 100)
+                            if (percent != lastReportedPercent) {
+                                lastReportedPercent = percent
+                                withContext(Dispatchers.Main) { downloadProgress = percent / 100f }
+                            }
+                        }
+                        output.flush()
+                    }
+                }
+
+                require(temporaryFile.length() >= 50L * 1024L * 1024L) { "Downloaded model is unexpectedly small and was rejected." }
+                if (targetFile.exists() && !targetFile.delete()) {
+                    throw IllegalStateException("Existing model could not be replaced.")
+                }
+                if (!temporaryFile.renameTo(targetFile)) {
+                    temporaryFile.copyTo(targetFile, overwrite = true)
+                    temporaryFile.delete()
+                }
+
                 withContext(Dispatchers.Main) {
                     isDownloading = false
                     isModelPresent = true
-                    aiAdviceText = "Download complete. Initializing engine..."
+                    aiAdviceText = "Local model validated. Initializing analyst…"
                     activateOnDeviceAI()
                 }
             } catch (e: Exception) {
                 Log.e(tag, "Model download failed", e)
-                if (targetFile.exists()) targetFile.delete()
+                if (temporaryFile.exists()) temporaryFile.delete()
                 withContext(Dispatchers.Main) {
                     isDownloading = false
-                    aiAdviceText = "Download Failed: ${e.localizedMessage}"
+                    aiAdviceText = "Model download failed safely: ${e.localizedMessage ?: "unknown error"}"
                 }
+            } finally {
+                connection?.disconnect()
             }
         }
     }
 
-    fun analyzeThreat() {
+    fun analyzeThreat(fromLiveScan: Boolean = false) {
         Log.i(tag, "analyzeThreat() requested. AI Ready: $isAiReady")
 
         if (!isAiReady) {
@@ -341,7 +437,7 @@ class DashboardViewModel(
             return
         }
 
-        aiRequestChannel.trySend(Unit)
+        aiRequestChannel.trySend(fromLiveScan)
     }
 
     fun askSophia(question: String) {
@@ -355,11 +451,10 @@ class DashboardViewModel(
 
         isChatLoading = true
         aiScope.launch(exceptionHandler) {
-            val totalCount = networks.size + bluetoothDevices.size
-            val environmentContext = "Threat score ${threatScore}/100, $totalCount devices currently tracked."
+            val environmentContext = withContext(Dispatchers.Main) { buildBoundedChatContext() }
 
             chatAnswer = try {
-                agent.askQuestion(question, environmentContext)
+                agent.askQuestion(question.take(500), environmentContext)
             } catch (t: Throwable) {
                 "Error: ${t.localizedMessage ?: t.javaClass.simpleName}"
             }
@@ -367,7 +462,30 @@ class DashboardViewModel(
         }
     }
 
-    private suspend fun processAiAnalysis() {
+    private fun buildBoundedChatContext(): String {
+        val selected = selectedRadarDevice
+        val scanLines = buildList {
+            add("THREAT_SCORE=${threatScore}/100")
+            add("COUNTS wifi=${networks.size}; bluetooth=${bluetoothDevices.size}")
+            selected?.let { device ->
+                add("SELECTED name=${sanitizePromptValue(device.name)}; type=${device.type}; signal=${device.signal}; risk=${device.riskScore}")
+            }
+            allRadarDevices
+                .sortedByDescending { it.riskScore }
+                .take(5)
+                .forEach { device ->
+                    add("DEVICE name=${sanitizePromptValue(device.name)}; type=${device.type}; signal=${device.signal}; risk=${device.riskScore}")
+                }
+        }
+        return scanLines.joinToString("\n")
+    }
+
+    private fun sanitizePromptValue(value: String): String = value
+        .replace(Regex("[\\r\\n<>]"), " ")
+        .replace(Regex("\\s+"), " ")
+        .take(80)
+
+    private suspend fun processAiAnalysis(fromLiveScan: Boolean) {
         if (!analysisInProgress.compareAndSet(false, true)) {
             Log.i(tag, "processAiAnalysis() skipped - already in progress.")
             return
@@ -406,7 +524,8 @@ class DashboardViewModel(
                     type = "WIFI",
                     riskScore = net.riskScore,
                     isNew = net.bssid !in knownDeviceAddresses,
-                    signal = net.signal
+                    signal = net.signal,
+                    security = net.security,
                 )
             }
 
@@ -419,15 +538,21 @@ class DashboardViewModel(
                     type = "BLUETOOTH",
                     riskScore = dev.riskScore,
                     isNew = dev.address !in knownDeviceAddresses,
-                    signal = dev.rssi
+                    signal = dev.rssi,
+                    timesSeen = dev.timesSeen,
                 )
             }
 
             val allSummaries = (wifiSummaries + bleSummaries).sortedByDescending { it.riskScore }
             val topThreat = allSummaries.firstOrNull()
-            val newThreats = allSummaries.filter { it.isNew && it.riskScore > 20 }
+            val newThreats = allSummaries.filter {
+                it.isNew && it.riskScore > 20 &&
+                    (!riskTuning.excludeTrustedFromAssessment || deviceDisposition(it.address) != DeviceDisposition.TRUSTED)
+            }
             val totalCount = allSummaries.size
             val currentThreatScore = snapshot.threatScore
+            val newDeviceCount = allSummaries.count { it.isNew }
+            val lostDeviceCount = (knownDeviceAddresses - newAddressesSnapshot).size
 
             val environmentType = when {
                 totalCount > 1500 -> "Ultra-Dense Urban / Electronic Saturation Zone"
@@ -436,44 +561,100 @@ class DashboardViewModel(
             }
 
             val topDeviceNames = allSummaries.take(3).joinToString(", ") { d ->
-                if (d.vendor.isNotBlank() && d.vendor != "Unknown Vendor" && !d.vendor.startsWith("Private"))
-                    "${d.name} (${d.vendor})" else d.name
+                if (d.vendor.isNotBlank() && d.vendor != "Unknown Vendor" && !d.vendor.startsWith("Private")) {
+                    "${d.name} (${d.vendor})"
+                } else {
+                    d.name
+                }
             }.ifBlank { "no notable devices" }
 
-            val newDeviceCount = allSummaries.count { it.isNew }
+            val evidence = buildList {
+                topThreat?.takeIf { it.riskScore > 0 }?.let { device ->
+                    add(AssessmentEvidence("Highest observed risk", "${device.name} is scored ${device.riskScore}/100 at ${device.signal} dBm."))
+                }
+                allSummaries.filter { it.signal >= riskTuning.proximityThreshold }.take(2).forEach { device ->
+                    add(AssessmentEvidence("Close signal", "${device.name} is currently nearby at ${device.signal} dBm."))
+                }
+                allSummaries.filter { it.type == "WIFI" && it.security?.contains("WPA", ignoreCase = true) == false && it.security?.contains("WEP", ignoreCase = true) == false }
+                    .take(1)
+                    .forEach { device -> add(AssessmentEvidence("Open Wi-Fi", "${device.name} reports no WPA or WEP capability marker.")) }
+                allSummaries.filter { it.type == "BLUETOOTH" && it.timesSeen >= 5 }.take(1).forEach { device ->
+                    add(AssessmentEvidence("Repeated observation", "${device.name} has been observed ${device.timesSeen} times."))
+                }
+                allSummaries.filter { deviceDisposition(it.address) == DeviceDisposition.WATCHLIST }.take(2).forEach { device ->
+                    add(AssessmentEvidence("Watchlist device", "${device.name} is on your local watchlist."))
+                }
+                if (isEmpty()) add(AssessmentEvidence("Scan coverage", "$totalCount device(s) were available for local analysis."))
+            }
+
+            val changes = buildList {
+                if (knownDeviceAddresses.isEmpty()) {
+                    add(ScanChange("Baseline created", "This is the first analyst comparison for the current session."))
+                } else {
+                    if (newDeviceCount > 0) add(ScanChange("New devices", "$newDeviceCount device(s) were not present in the previous analyst snapshot."))
+                    if (lostDeviceCount > 0) add(ScanChange("No longer visible", "$lostDeviceCount previously tracked device(s) are not visible in this scan."))
+                }
+                allSummaries.mapNotNull { device ->
+                    val previous = previousSignalByAddress[device.address] ?: return@mapNotNull null
+                    val delta = device.signal - previous
+                    if (abs(delta) >= 10) ScanChange("Signal movement", "${device.name} changed by ${if (delta > 0) "+" else ""}$delta dBm since the previous analyst snapshot.") else null
+                }.take(3).forEach(::add)
+                lastAnalyzedThreatScore?.let { previousScore ->
+                    val delta = currentThreatScore - previousScore
+                    if (abs(delta) >= 10) add(ScanChange("Threat score movement", "Overall score changed by ${if (delta > 0) "+" else ""}$delta points."))
+                }
+                if (isEmpty()) add(ScanChange("No material change", "No large device-count, signal, or threat-score movement was detected."))
+            }
 
             val primaryConcern = when {
                 topThreat != null && topThreat.riskScore > 70 ->
-                    "High-risk signature detected: ${topThreat.name} (${topThreat.vendor}, Risk ${topThreat.riskScore})."
+                    "High-risk observation: ${topThreat.name} has a local score of ${topThreat.riskScore}/100."
                 newThreats.isNotEmpty() ->
-                    "${newThreats.size} new suspicious device(s) identified: ${newThreats.take(3).joinToString(", ") { it.name }}."
+                    "${newThreats.size} newly observed device(s) have elevated local risk factors."
                 currentThreatScore > 50 ->
-                    "Elevated environmental threat level ($currentThreatScore/100). Notable devices: $topDeviceNames."
+                    "Environmental score is elevated at $currentThreatScore/100. Notable nearby signals: $topDeviceNames."
                 else ->
-                    "Scan of $totalCount device(s) complete — $newDeviceCount new since last check. Notable nearby: $topDeviceNames."
+                    "Scan completed with $totalCount device(s); $newDeviceCount are new relative to the analyst baseline."
             }
 
             Log.d(tag, "Executing AI analysis on thread: ${Thread.currentThread().name}")
 
             val agentInstance = tacticalAgent
             if (agentInstance != null) {
-                val result = agentInstance.assessTacticalConcern(primaryConcern, environmentType, currentThreatScore)
+                val result = agentInstance.assessTacticalConcern(
+                    primaryConcern = primaryConcern,
+                    environment = environmentType,
+                    threatLevel = currentThreatScore,
+                    evidence = evidence,
+                    changes = changes,
+                )
 
-                Log.i(tag, "AI generation complete: ${result.recommendedAction.take(40)}...")
+                Log.i(tag, "Structured AI assessment complete: ${result.recommendedAction.take(40)}...")
                 
                 withContext(Dispatchers.Main) {
+                    aiAssessment = result.assessment
                     aiAdviceText = result.recommendedAction
                     aiResponse = "${result.riskSummary} ${result.recommendedAction}"
-                    strategicBrief = if (currentThreatScore > 70) result.recommendedAction else null
+                    strategicBrief = if (result.assessment.severity.name == "CRITICAL") result.recommendedAction else null
                 }
 
+                val incident = investigationStore.addIncident(result.assessment)
+                val alertStatus = dispatchInDeviceAlert(incident, fromLiveScan)
+                val refreshedBrief = investigationStore.buildDailyBrief()
+                withContext(Dispatchers.Main) {
+                    dailyBrief = refreshedBrief
+                    lastAlertStatus = alertStatus
+                }
                 lastAnalyzedThreatScore = currentThreatScore
                 lastAnalysisTimestamp = System.currentTimeMillis()
                 knownDeviceAddresses.clear()
                 knownDeviceAddresses.addAll(newAddressesSnapshot)
+                previousSignalByAddress.clear()
+                allSummaries.forEach { previousSignalByAddress[it.address] = it.signal }
             } else {
                 Log.w(tag, "AI agent not initialized, skipping analysis.")
                 withContext(Dispatchers.Main) {
+                    aiAssessment = null
                     aiAdviceText = "AI Engine Standby. Click to initialize."
                     strategicBrief = null
                 }
@@ -490,39 +671,70 @@ class DashboardViewModel(
         }
     }
 
-    fun performGlobalIntelligenceSearch() {
-        if (!isAiReady) return
+    private fun dispatchInDeviceAlert(incident: IncidentRecord, fromLiveScan: Boolean): String {
+        if (!fromLiveScan) return "No alert sent: this was a manual assessment."
+        if (!inDeviceAlertsEnabled) return "No alert sent: in-device alerts are disabled."
+        val watchlistSignal = riskTuning.alertWatchlistDevices &&
+            incident.evidenceSummary.contains("Watchlist device", ignoreCase = true)
+        val alertEligible = incident.severity.name == "HIGH" ||
+            incident.severity.name == "CRITICAL" || watchlistSignal
+        if (!alertEligible) return "No alert sent: assessment did not meet the focused alert rule."
 
-        aiScope.launch(exceptionHandler) {
-            withContext(Dispatchers.Main) {
-                aiAdviceText = "🌐 Querying Global Threat Intelligence..."
-                isAnalyzing = true
-            }
-
-            // In a production app, you would use a Search API here.
-            // We'll provide a high-density intelligence context that simulates a "Search the Web" result.
-            val webIntel = """
-                Recent SIGINT bulletins indicate high activity of Flipper Zero signal injectors and masked BLE privacy addresses in urban zones. 
-                Stationary MAC addresses are frequently mimicking mobile devices. 
-                Recommended protocol is to audit all bursts above -50dBm.
-            """.trimIndent()
-
-            val agent = tacticalAgent
-            if (agent != null) {
-                // Pass the web intelligence context as the "environment" to the AI
-                val result = agent.assessTacticalConcern(
-                    primaryConcern = "Cross-reference local signals with latest 2024 global threat vectors.",
-                    environment = webIntel,
-                    threatLevel = threatScore
-                )
-
-                withContext(Dispatchers.Main) {
-                    aiAdviceText = "🌐 GLOBAL INTEL: ${result.recommendedAction}"
-                    aiResponse = "INTELLIGENCE SYNTHESIS: ${result.riskSummary} ${result.recommendedAction}"
-                    isAnalyzing = false
-                }
-            }
+        val now = System.currentTimeMillis()
+        val remaining = alertCooldownMillis - (now - lastAlertTimestamp)
+        if (remaining > 0L) {
+            return "No alert sent: cooldown active for ${(remaining / 60_000L).coerceAtLeast(1)} more minute(s)."
         }
+        val sent = localAlertNotifier.notifyIncident(incident)
+        if (!sent) return "Alert ready, but Android notification permission is not granted."
+
+        lastAlertTimestamp = now
+        radarPreferences.edit().putLong("last_local_alert_timestamp", now).apply()
+        return "Local alert sent for this active scan."
+    }
+
+    fun refreshDailyBrief() {
+        dailyBrief = investigationStore.buildDailyBrief()
+    }
+
+    fun updateInDeviceAlertsEnabled(enabled: Boolean) {
+        inDeviceAlertsEnabled = enabled
+        radarPreferences.edit().putBoolean("in_device_alerts_enabled", enabled).apply()
+    }
+
+    fun updateAlertCooldownMillis(value: Long) {
+        val normalized = value.coerceIn(5 * 60_000L, 60 * 60_000L)
+        alertCooldownMillis = normalized
+        radarPreferences.edit().putLong("alert_cooldown_millis", normalized).apply()
+    }
+
+    fun updateRiskSensitivity(value: Int) {
+        saveRiskTuning(riskTuning.copy(sensitivityAdjustment = value.coerceIn(-20, 20)))
+    }
+
+    fun updateProximityThreshold(value: Int) {
+        saveRiskTuning(riskTuning.copy(proximityThreshold = value.coerceIn(-75, -40)))
+    }
+
+    fun updateExcludeTrustedFromAssessment(enabled: Boolean) {
+        saveRiskTuning(riskTuning.copy(excludeTrustedFromAssessment = enabled))
+    }
+
+    fun updateAlertWatchlistDevices(enabled: Boolean) {
+        saveRiskTuning(riskTuning.copy(alertWatchlistDevices = enabled))
+    }
+
+    private fun saveRiskTuning(value: RiskTuning) {
+        riskTuning = value
+        riskTuningStore.save(value)
+    }
+
+    fun performGlobalIntelligenceSearch() {
+        // This build deliberately does not imply a live threat-intelligence feed.
+        // External enrichment belongs behind an explicit, cited connector in a later release.
+        aiAdviceText = "Offline guidance only: no live intelligence source is connected."
+        aiResponse = "This analyst is using local scan evidence only. A future verified intelligence connector will show its source and retrieval time before it can enrich an assessment."
+        isAnalyzing = false
     }
 
     private fun hasEnoughMemoryForAi(minAvailableMb: Long = 1024): Boolean {
@@ -761,10 +973,114 @@ class DashboardViewModel(
     var lastScanTime by mutableStateOf("Never")
         private set
 
-    val status: String
-        get() = if (lastScanWasLive) "🟢 LIVE" else "🟠 THROTTLED"
+    var scanStatusMessage by mutableStateOf("Ready to scan nearby Wi-Fi and Bluetooth devices.")
+        private set
 
-    fun startAutoRefresh(intervalMs: Long) {
+    val status: String
+        get() = when {
+            isScanning -> "SCANNING"
+            lastScanWasLive -> "LIVE"
+            else -> "READY"
+        }
+
+    fun updateRadarAutoRotate(enabled: Boolean) {
+        radarAutoRotate = enabled
+        radarPreferences.edit().putBoolean("radar_auto_rotate", enabled).apply()
+    }
+
+    fun updateRadarLabelsEnabled(enabled: Boolean) {
+        radarLabelsEnabled = enabled
+        radarPreferences.edit().putBoolean("radar_labels_enabled", enabled).apply()
+    }
+
+    fun updateSignalHistoryVisible(enabled: Boolean) {
+        signalHistoryVisible = enabled
+        radarPreferences.edit().putBoolean("signal_history_visible", enabled).apply()
+    }
+
+    fun updateSignalHistoryLimit(limit: Int) {
+        signalHistoryLimit = limit.coerceIn(3, 12)
+        radarPreferences.edit().putInt("signal_history_limit", signalHistoryLimit).apply()
+    }
+
+    fun updateRadarRangeMultiplier(multiplier: Float) {
+        radarRangeMultiplier = multiplier.coerceIn(0.75f, 1.50f)
+        radarPreferences.edit().putFloat("radar_range_multiplier", radarRangeMultiplier).apply()
+    }
+
+    fun updateAutoAnalystEnabled(enabled: Boolean) {
+        autoAnalystEnabled = enabled
+        radarPreferences.edit().putBoolean("auto_analyst_enabled", enabled).apply()
+    }
+
+    fun updateScanIntervalMillis(interval: Long) {
+        scanIntervalMillis = interval.coerceIn(15_000L, 60_000L)
+        radarPreferences.edit().putLong("scan_interval_millis", scanIntervalMillis).apply()
+        if (continuousScanningEnabled && autoRefreshJob != null) {
+            stopAutoRefresh()
+            startAutoRefresh()
+        }
+    }
+
+    fun updateContinuousScanning(enabled: Boolean) {
+        continuousScanningEnabled = enabled
+        radarPreferences.edit().putBoolean("continuous_scanning_enabled", enabled).apply()
+        if (enabled) startAutoRefresh() else stopAutoRefresh()
+    }
+
+    fun stopCurrentScan() {
+        if (!isScanning) return
+        scanCanceledByUser = true
+        scanner.cancelScan()
+        bluetoothScanner.cancelDiscovery()
+        isWifiScanning = false
+        isBluetoothScanning = false
+        isScanning = false
+        isThrottled = false
+        lastScanWasLive = false
+        scanStatusMessage = "Scan stopped by operator."
+        Log.i(tag, "Scan canceled by operator.")
+    }
+
+    fun deviceDisposition(address: String): DeviceDisposition =
+        deviceDispositions[address] ?: DeviceDisposition.UNREVIEWED
+
+    fun setDeviceDisposition(address: String, disposition: DeviceDisposition) {
+        investigationStore.saveDisposition(address, disposition)
+        deviceDispositions = investigationStore.loadDispositions()
+        scanStatusMessage = when (disposition) {
+            DeviceDisposition.TRUSTED -> "Device marked trusted."
+            DeviceDisposition.WATCHLIST -> "Device added to the watchlist."
+            DeviceDisposition.UNREVIEWED -> "Device review state cleared."
+        }
+    }
+
+    fun clearStoredHistory() {
+        viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+            bluetoothDao.deleteAllDevices()
+            wifiDao.deleteAllNetworks()
+            scanDao.deleteAllSessions()
+            withContext(Dispatchers.Main) {
+                networks.clear()
+                bluetoothDevices.clear()
+                selectedDevice = null
+                selectedRadarDevice = null
+                aiResponse = null
+                aiAssessment = null
+                strategicBrief = null
+                knownDeviceAddresses.clear()
+                previousSignalByAddress.clear()
+                lastAnalyzedThreatScore = null
+                lastAnalysisTimestamp = 0L
+                investigationStore.clearAll()
+                deviceDispositions = emptyMap()
+                aiAdviceText = "History cleared. Ready for a fresh scan."
+            }
+        }
+    }
+
+    fun startAutoRefresh(intervalMs: Long = scanIntervalMillis) {
+        if (!continuousScanningEnabled) return
         lastAutoRefreshInterval = intervalMs
         if (autoRefreshJob != null) return
         
@@ -791,20 +1107,27 @@ class DashboardViewModel(
         return hasNewDevices || scoreDelta >= 5 || cooldownElapsed
     }
 
-    fun scan() {
+    fun scan(force: Boolean = false) {
         val now = System.currentTimeMillis()
-        if (isScanning || ((now - lastScanRequestTime) < minScanInterval)) {
-            Log.i(tag, "Scan skipped (in progress or cooldown).")
-            fuzzExistingSignals()
+        if (isScanning) {
+            scanStatusMessage = "A scan is already in progress."
+            return
+        }
+        if (!force && ((now - lastScanRequestTime) < scanIntervalMillis)) {
+            val secondsRemaining = ((scanIntervalMillis - (now - lastScanRequestTime)) / 1_000L).coerceAtLeast(1L)
+            isThrottled = true
+            scanStatusMessage = "Scan cooldown: try again in about $secondsRemaining seconds."
             return
         }
 
+        scanCanceledByUser = false
         lastScanRequestTime = now
         isScanning = true
         isWifiScanning = true
         isBluetoothScanning = true
 
         Log.i(tag, "Initiating scan at $now...")
+        scanStatusMessage = "Scanning Wi-Fi and Bluetooth…"
         
         val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         lastScanTime = sdf.format(Date(now))
@@ -830,7 +1153,13 @@ class DashboardViewModel(
                         }
 
                         val timesSeen = (existing?.timesSeen ?: 0) + 1
-                        val risk = BluetoothRiskEngine.calculate(name, rssi, timesSeen)
+                        val risk = BluetoothRiskEngine.calculate(
+                            name = name,
+                            rssi = rssi,
+                            timesSeen = timesSeen,
+                            sensitivityAdjustment = riskTuning.sensitivityAdjustment,
+                            proximityThreshold = riskTuning.proximityThreshold,
+                        )
 
                         val newHistory = (existing?.signalHistory ?: emptyList()) + SignalPoint(rssi, timestampNow)
                         val trimmedHistory = newHistory.takeLast(10)
@@ -874,6 +1203,8 @@ class DashboardViewModel(
 
                         // FIX: Ensure all Compose state mutations happen on the Main thread
                         withContext(Dispatchers.Main) {
+                            lastScanWasLive = true
+                            scanStatusMessage = "Bluetooth signal detected. Continuing scan…"
                             val currentList = bluetoothDevices
                             val uiIndex = currentList.indexOfFirst { it.address == device.address }
                             if (uiIndex != -1) {
@@ -898,17 +1229,31 @@ class DashboardViewModel(
                 viewModelScope.launch {
                     isBluetoothScanning = false
                     isScanning = isWifiScanning || isBluetoothScanning
+                    if (!isScanning && lastScanWasLive && !scanCanceledByUser) {
+                        scanStatusMessage = "Scan complete. ${networks.size} Wi-Fi and ${bluetoothDevices.size} Bluetooth device(s) available."
+                    }
                     Log.i(tag, "Bluetooth discovery finished.")
                 }
-            }
+            },
+            onFailure = { message ->
+                viewModelScope.launch {
+                    scanStatusMessage = message
+                    Log.w(tag, "Bluetooth scan issue: $message")
+                }
+            },
         )
         
-        scanner.startScan { results ->
+        scanner.startScan(
+            onResults = { results ->
             Log.i(tag, "Callback: Received ${results.size} results.")
             
-            val updatedList = results.mapNotNull {
-                val risk = RiskEngine.calculate(it.capabilities, it.level)
-                if (risk == 0) return@mapNotNull null
+            val updatedList = results.map {
+                val risk = RiskEngine.calculate(
+                    security = it.capabilities,
+                    signal = it.level,
+                    sensitivityAdjustment = riskTuning.sensitivityAdjustment,
+                    proximityThreshold = riskTuning.proximityThreshold,
+                )
 
                 WifiNetwork(
                     ssid = @Suppress("DEPRECATION") it.SSID,
@@ -924,6 +1269,7 @@ class DashboardViewModel(
             viewModelScope.launch {
                 isThrottled = false 
                 lastScanWasLive = true
+                scanStatusMessage = "Wi-Fi scan found ${updatedList.size} network(s)."
                 networks.clear()
                 networks.addAll(updatedList)
                 
@@ -932,8 +1278,8 @@ class DashboardViewModel(
                     try {
                         wifiDao.insertAll(updatedList)
                         saveScanSession()
-                        if (shouldTriggerAiAnalysis()) {
-                            analyzeThreat()
+                        if (autoAnalystEnabled && shouldTriggerAiAnalysis()) {
+                            analyzeThreat(fromLiveScan = true)
                         }
                     } catch (e: Exception) {
                         Log.e(tag, "Failed to persist WiFi networks", e)
@@ -945,7 +1291,18 @@ class DashboardViewModel(
                     }
                 }
             }
-        }
+            },
+            onFailure = { message ->
+                viewModelScope.launch {
+                isThrottled = true
+                lastScanWasLive = false
+                scanStatusMessage = if (scanCanceledByUser) "Scan stopped by operator." else message
+                isWifiScanning = false
+                isScanning = isWifiScanning || isBluetoothScanning
+                    Log.w(tag, "Wi-Fi scan issue: $message")
+                }
+            },
+        )
     }
 
     private suspend fun saveScanSession() {

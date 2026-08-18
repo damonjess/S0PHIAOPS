@@ -1,6 +1,7 @@
 package com.sophia.ops.ui.history
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,6 +12,7 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,6 +24,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
 import com.sophia.ops.data.entities.ScanSession
 import com.sophia.ops.viewmodel.HistoryViewModel
 import java.text.SimpleDateFormat
@@ -31,6 +34,8 @@ import java.util.*
 fun HistoryScreen(vm: HistoryViewModel) {
     val history by vm.sessions.collectAsState()
     val context = LocalContext.current
+    LaunchedEffect(Unit) { vm.refreshIncidents() }
+    val incidents = vm.incidents
     var showClearHistoryDialog by remember {
         mutableStateOf(false)
     }
@@ -93,6 +98,21 @@ fun HistoryScreen(vm: HistoryViewModel) {
                             Text("Clear History")
                         }
                     }
+                }
+            }
+
+            if (incidents.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "Investigation Timeline",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF72F5B2),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    )
+                }
+                items(incidents) { incident ->
+                    IncidentHistoryItem(incident, vm)
                 }
             }
 
@@ -240,5 +260,102 @@ fun StatItem(label: String, value: String, color: Color = MaterialTheme.colorSch
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(text = label, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
         Text(text = value, style = MaterialTheme.typography.bodyLarge, color = color)
+    }
+}
+
+@Composable
+private fun IncidentHistoryItem(incident: com.sophia.ops.data.IncidentRecord, vm: HistoryViewModel) {
+    val severityColor = when (incident.severity) {
+        com.sophia.ops.ai.AssessmentSeverity.CRITICAL -> Color(0xFFFF5252)
+        com.sophia.ops.ai.AssessmentSeverity.HIGH -> Color(0xFFFF8A65)
+        com.sophia.ops.ai.AssessmentSeverity.MEDIUM -> Color(0xFFFFD166)
+        com.sophia.ops.ai.AssessmentSeverity.LOW -> Color(0xFF72F5B2)
+    }
+    val date = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(incident.createdAt))
+    val context = LocalContext.current
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19)),
+        border = BorderStroke(1.dp, severityColor.copy(alpha = 0.45f)),
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = incident.severity.name,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = severityColor,
+                )
+                Text(
+                    text = "$date · ${incident.confidence.lowercase()} confidence",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.LightGray,
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = incident.headline,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White,
+                fontWeight = FontWeight.Medium,
+            )
+            if (incident.changeSummary.isNotBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Change: ${incident.changeSummary}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFB9FFD9),
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Next step: ${incident.recommendedAction}",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.LightGray,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            when (incident.status) {
+                com.sophia.ops.data.IncidentStatus.OPEN -> Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TextButton(
+                        onClick = { vm.updateIncidentStatus(incident.id, com.sophia.ops.data.IncidentStatus.ACKNOWLEDGED) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("ACKNOWLEDGE") }
+                    Button(
+                        onClick = { vm.updateIncidentStatus(incident.id, com.sophia.ops.data.IncidentStatus.RESOLVED) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("RESOLVE") }
+                }
+                com.sophia.ops.data.IncidentStatus.ACKNOWLEDGED -> Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("ACKNOWLEDGED", style = MaterialTheme.typography.labelSmall, color = Color(0xFFFFD166))
+                    Button(onClick = { vm.updateIncidentStatus(incident.id, com.sophia.ops.data.IncidentStatus.RESOLVED) }) {
+                        Text("RESOLVE")
+                    }
+                }
+                com.sophia.ops.data.IncidentStatus.RESOLVED -> Text(
+                    text = "RESOLVED LOCALLY",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF72F5B2),
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            TextButton(
+                onClick = { vm.generateIncidentPdf(context, incident) },
+                modifier = Modifier.align(Alignment.End),
+            ) { Text("EXPORT LOCAL PDF") }
+        }
     }
 }

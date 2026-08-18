@@ -4,28 +4,27 @@ object RiskEngine {
 
     fun calculate(
         security: String,
-        signal: Int
+        signal: Int,
+        sensitivityAdjustment: Int = 0,
+        proximityThreshold: Int = -55,
     ): Int {
-        // Exclusion: Too far away for viable target injection or MITM attack
-        if (signal < -80) return 0
+        val tunedProximity = proximityThreshold.coerceIn(-75, -40)
+        val weakSignalCutoff = tunedProximity - 25
+        if (signal < weakSignalCutoff) return 0
 
-        var score = 15 // Baseline for persistent proximity
-
-        // Prioritize open, unencrypted networks
-        val isOpen = !security.contains("WPA") && !security.contains("WEP")
-        val isWEP = security.contains("WEP")
+        var score = 15
+        val isOpen = !security.contains("WPA", ignoreCase = true) && !security.contains("WEP", ignoreCase = true)
+        val isWep = security.contains("WEP", ignoreCase = true)
 
         if (isOpen) {
             score += 35
-            // Proximity weight: Exhibit strong proximity profile
-            if (signal > -55) score += 30 
-        } else if (isWEP) {
+            if (signal > tunedProximity) score += 30
+        } else if (isWep) {
             score += 25
         }
 
-        // General proximity boost
-        if (signal > -50) score += 20
+        if (signal > tunedProximity + 5) score += 20
 
-        return score.coerceIn(0, 100)
+        return (score + sensitivityAdjustment.coerceIn(-20, 20)).coerceIn(0, 100)
     }
 }

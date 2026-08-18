@@ -1,5 +1,6 @@
 package com.sophia.ops.bluetooth
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -11,85 +12,105 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
+import java.util.concurrent.atomic.AtomicBoolean
 
 class BluetoothScanner(
     private val context: Context,
 ) {
     private val tag = "BluetoothScanner"
-    private val adapter: BluetoothAdapter? = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
+    private val appContext = context.applicationContext
+    private val adapter: BluetoothAdapter? =
+        (appContext.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
     private val handler = Handler(Looper.getMainLooper())
 
+    @Volatile
+    private var activeCancellation: (() -> Unit)? = null
+
+    fun cancelDiscovery() {
+        activeCancellation?.invoke()
+    }
+
+    /**
+     * Runs BLE and classic Bluetooth discovery in parallel. Every exit path
+     * invokes [onDiscoveryFinished] so the UI never remains in a stuck
+     * “Scanning…” state when Bluetooth is unavailable or permission is denied.
+     */
     @SuppressLint("MissingPermission")
     fun startDiscovery(
         onDeviceFound: (BluetoothDevice, Int) -> Unit,
-        onDiscoveryFinished: () -> Unit = {}
+        onDiscoveryFinished: () -> Unit = {},
+        onFailure: (String) -> Unit = {},
     ) {
-        if (adapter == null) {
-            Log.e(tag, "BluetoothAdapter is null")
+        val preflightError = preflightError()
+        if (preflightError != null) {
+            Log.w(tag, preflightError)
+            onFailure(preflightError)
+            onDiscoveryFinished()
             return
         }
 
-        if (!adapter.isEnabled) {
-            Log.e(tag, "Bluetooth is disabled. Cannot start discovery.")
+        val bluetoothAdapter = adapter ?: run {
+            val message = "Bluetooth hardware is not available on this device."
+            onFailure(message)
+            onDiscoveryFinished()
             return
         }
-
-        // Final permission check before interacting with adapter to avoid crashes
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                Log.e(tag, "Cannot start discovery: BLUETOOTH_SCAN permission not granted")
-                return
-            }
-        }
-
-        // 1. BLE Scan (Maximum Power Mode)
+        val completed = AtomicBoolean(false)
         val leScanner = try {
-            adapter.bluetoothLeScanner
-        } catch (e: SecurityException) {
-            Log.e(tag, "SecurityException accessing bluetoothLeScanner", e)
+            bluetoothAdapter.bluetoothLeScanner
+        } catch (error: SecurityException) {
+            Log.e(tag, "Unable to access Bluetooth LE scanner", error)
             null
         }
-        
-        val leCallback = object : ScanCallback() {
-            override fun onScanResult(callbackType: Int, result: ScanResult) {
-                val hasConnectPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                } else {
-                    true
-                }
 
-                if (hasConnectPermission) {
-                    Log.d("BT", "LE Found: ${result.device.address} [${result.rssi}]")
-                    onDeviceFound(result.device, result.rssi)
-                }
-            }
-        }
+        lateinit var receiver: BroadcastReceiver
+        lateinit var leCallback: ScanCallback
+        lateinit var timeout: Runnable
 
-        if (leScanner != null) {
-            val settings = ScanSettings.Builder()
-                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-                .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
-                .build()
-            
+        fun finishDiscovery() {
+            if (!completed.compareAndSet(false, true)) return
+            activeCancellation = null
+            handler.removeCallbacks(timeout)
             try {
-                leScanner.startScan(null, settings, leCallback)
-                Log.i(tag, "LE Scan started in LOW_LATENCY (Max Power) mode")
-            } catch (e: SecurityException) {
-                Log.e(tag, "SecurityException starting LE scan", e)
+                leScanner?.stopScan(leCallback)
             } catch (_: Exception) {
-                Log.e(tag, "Failed to start LE scan")
+                // The scanner may already be stopped by the system.
+            }
+            try {
+                appContext.unregisterReceiver(receiver)
+            } catch (_: IllegalArgumentException) {
+                // The receiver may already be unregistered.
+            } catch (error: Exception) {
+                Log.w(tag, "Unable to unregister Bluetooth receiver", error)
+            }
+            onDiscoveryFinished()
+        }
+
+        leCallback = object : ScanCallback() {
+            override fun onScanResult(callbackType: Int, result: ScanResult) {
+                try {
+                    onDeviceFound(result.device, result.rssi)
+                } catch (error: SecurityException) {
+                    Log.w(tag, "Unable to read a Bluetooth LE result", error)
+                }
+            }
+
+            override fun onScanFailed(errorCode: Int) {
+                val message = "Bluetooth LE scan failed (error $errorCode). Toggle Bluetooth and try again."
+                Log.w(tag, message)
+                onFailure(message)
+                // Classic discovery may still return results, so do not end it early.
             }
         }
 
-        // 2. Classic Discovery
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                Log.d("BT", "Receiver triggered: ${intent?.action}")
+        receiver = object : BroadcastReceiver() {
+            override fun onReceive(receiverContext: Context?, intent: Intent?) {
                 when (intent?.action) {
                     BluetoothDevice.ACTION_FOUND -> {
                         val device: BluetoothDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -98,94 +119,106 @@ class BluetoothScanner(
                             @Suppress("DEPRECATION")
                             intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                         }
-                        
-                        val rssi: Int = intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, Short.MIN_VALUE).toInt()
-
-                        val hasConnectPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            context?.checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                        } else {
-                            true
-                        }
-
-                        if (hasConnectPermission) {
-                            Log.d("BT", "Found: ${device?.name} [${device?.address}] RSSI: $rssi")
-                            device?.let {
-                                onDeviceFound(it, rssi)
-                            }
+                        val rssi = intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, Short.MIN_VALUE).toInt()
+                        if (device != null && rssi != Short.MIN_VALUE.toInt()) {
+                            onDeviceFound(device, rssi)
                         }
                     }
                     BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
-                        Log.i(tag, "Discovery finished")
-                        try {
-                            leScanner?.stopScan(leCallback)
-                            context?.unregisterReceiver(this)
-                        } catch (_: Exception) {
-                            // Already unregistered
-                        }
-                        onDiscoveryFinished()
+                        Log.i(tag, "Classic Bluetooth discovery finished")
+                        finishDiscovery()
                     }
                 }
             }
         }
-
-        // Safety timeout to stop LE scan if discovery finished broadcast is missed
-        handler.postDelayed(
-            {
-                try {
-                    leScanner?.stopScan(leCallback)
-                } catch (_: Exception) {
-                }
-            },
-            15000,
-        )
 
         val filter = IntentFilter().apply {
             addAction(BluetoothDevice.ACTION_FOUND)
             addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
         }
-
         try {
             ContextCompat.registerReceiver(
-                context,
+                appContext,
                 receiver,
                 filter,
-                ContextCompat.RECEIVER_EXPORTED
+                ContextCompat.RECEIVER_EXPORTED,
             )
-        } catch (e: Exception) {
-            Log.e(tag, "Failed to register receiver", e)
+        } catch (error: Exception) {
+            val message = "Bluetooth receiver could not be registered: ${error.localizedMessage ?: "unknown error"}"
+            Log.e(tag, message, error)
+            onFailure(message)
+            onDiscoveryFinished()
+            return
+        }
+
+        timeout = Runnable {
+            try {
+                if (bluetoothAdapter.isDiscovering) bluetoothAdapter.cancelDiscovery()
+            } catch (_: Exception) {
+                // Continue to final cleanup even when the platform scan state changed.
+            }
+            finishDiscovery()
+        }
+        handler.postDelayed(timeout, BLUETOOTH_SCAN_TIMEOUT_MS)
+        activeCancellation = {
+            try {
+                if (bluetoothAdapter.isDiscovering) bluetoothAdapter.cancelDiscovery()
+            } catch (_: Exception) {
+                // Final cleanup below is still safe if the platform state changed.
+            }
+            finishDiscovery()
         }
 
         try {
-            val isDiscovering = try {
-                adapter.isDiscovering
-            } catch (e: SecurityException) {
-                false
+            if (leScanner == null) {
+                onFailure("Bluetooth LE scanning is unavailable on this device; trying classic discovery only.")
+            } else {
+                leScanner.startScan(
+                    null,
+                    ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(),
+                    leCallback,
+                )
+                Log.i(tag, "Bluetooth LE scan started")
             }
 
-            if (isDiscovering) {
-                adapter.cancelDiscovery()
-            }
-
-            val started = try {
-                adapter.startDiscovery()
-            } catch (e: SecurityException) {
-                Log.e(tag, "SecurityException during startDiscovery", e)
-                false
-            }
-            Log.d("BT", "Discovery started: $started")
-
+            if (bluetoothAdapter.isDiscovering) bluetoothAdapter.cancelDiscovery()
+            val started = bluetoothAdapter.startDiscovery()
             if (!started) {
-                try {
-                    context.unregisterReceiver(receiver)
-                } catch (_: Exception) {
-                    // Ignore
-                }
+                val message = "Bluetooth discovery was not started. Toggle Bluetooth and try again."
+                Log.w(tag, message)
+                onFailure(message)
+                // Leave LE active briefly; it can still discover nearby BLE devices.
+            } else {
+                Log.i(tag, "Classic Bluetooth discovery started")
             }
-        } catch (_: Exception) {
-            Log.e(tag, "Error during discovery start")
-            try {
-                context.unregisterReceiver(receiver)
-            } catch (_: Exception) { }
+        } catch (error: SecurityException) {
+            val message = "Bluetooth permission was denied while starting discovery."
+            Log.e(tag, message, error)
+            onFailure(message)
+            finishDiscovery()
+        } catch (error: Exception) {
+            val message = "Bluetooth discovery failed: ${error.localizedMessage ?: "unknown error"}"
+            Log.e(tag, message, error)
+            onFailure(message)
+            finishDiscovery()
         }
+    }
+
+    private fun preflightError(): String? {
+        val bluetoothAdapter = adapter ?: return "Bluetooth hardware is not available on this device."
+        if (!bluetoothAdapter.isEnabled) return "Bluetooth is turned off. Enable Bluetooth and try again."
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+                return "Nearby devices permission is required for Bluetooth scanning."
+            }
+            if (appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                return "Nearby devices permission is required to read Bluetooth devices."
+            }
+        }
+        return null
+    }
+
+    private companion object {
+        const val BLUETOOTH_SCAN_TIMEOUT_MS = 15_000L
     }
 }

@@ -64,6 +64,9 @@ import androidx.compose.ui.unit.dp
 import com.sophia.ops.data.entities.BluetoothDeviceEntity
 import com.sophia.ops.model.NetworkDevice
 import com.sophia.ops.data.OuiLookup
+import com.sophia.ops.data.DeviceDisposition
+import com.sophia.ops.ai.AiAssessment
+import com.sophia.ops.ai.AssessmentSeverity
 import com.sophia.ops.viewmodel.DashboardViewModel
 import kotlin.math.PI
 import kotlin.math.cos
@@ -87,7 +90,7 @@ fun RadarScreen(
     )
 
     DisposableEffect(vm) {
-        vm.startAutoRefresh(5000)
+        vm.startAutoRefresh()
         onDispose {
             vm.stopAutoRefresh()
         }
@@ -120,7 +123,7 @@ fun RadarScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Tactical Radar",
+                text = "Signal Command",
                 style = MaterialTheme.typography.headlineMedium
             )
             AssistChip(
@@ -139,11 +142,15 @@ fun RadarScreen(
         ) {
             Button(
                 onClick = {
-                    vm.scan()
+                    if (vm.isScanning) vm.stopCurrentScan()
+                    else vm.scan(force = true)
                 },
-                modifier = Modifier.scale(scanButtonScale)
+                modifier = Modifier.scale(scanButtonScale),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (vm.isScanning) Color(0xFF8B1E2D) else MaterialTheme.colorScheme.primary,
+                ),
             ) {
-                Text(if (vm.isScanning) "Scanning..." else "Manual Scan")
+                Text(if (vm.isScanning) "STOP SCAN" else "START SCAN")
             }
             
             Spacer(modifier = Modifier.width(16.dp))
@@ -182,126 +189,11 @@ fun RadarScreen(
             LegendItem("Fav", Color.Yellow)
         }
 
-        val density = LocalDensity.current
         val devicesList = vm.allRadarDevices
-        
-        Spacer(
-            modifier = Modifier
-                .height(400.dp) // Fixed height for radar when scrolling
-                .fillMaxWidth()
-                .pointerInput(devicesList) {
-                    detectTapGestures { tapOffset ->
-                        val center = size.width / 2f
-                        val minDim = minOf(size.width, size.height).toFloat()
-                        
-                        // Find if the tap is close to any device's calculated position
-                        val clickedDevice = devicesList.find { device ->
-                            // 1. Re-calculate the dot's X and Y based on your radar logic
-                            val normalized = ((device.signal + 100).coerceIn(0, 100)).toFloat() / 100f
-                            val radius = (minDim / 2.2f) * (1f - normalized)
-                            val angleRad = device.radarAngle.toDouble() * PI / 180.0
-                            
-                            val dotX = center + (radius * cos(angleRad)).toFloat()
-                            val dotY = center + (radius * sin(angleRad)).toFloat()
-                            
-                            // 2. Calculate distance between tap and dot
-                            val distance = hypot((tapOffset.x - dotX).toDouble(), (tapOffset.y - dotY).toDouble())
-                            
-                            // 3. Define a touch target tolerance (e.g., 24dp in pixels)
-                            val touchTolerance = with(density) { 24.dp.toPx() }
-                            distance <= touchTolerance
-                        }
-                        
-                        // Update the viewmodel with the clicked device (or null if they tapped empty space)
-                        vm.selectDevice(clickedDevice)
-                    }
-                }
-                .drawBehind {
-                    val center = Offset(size.width / 2, size.height / 2)
-                    val maxRadius = size.minDimension / 2
-
-                    // Draw concentric circles
-                    val circleCount = 4
-                    for (i in 1..circleCount) {
-                        drawCircle(
-                            color = Color.Green.copy(alpha = 0.3f),
-                            radius = maxRadius * (i.toFloat() / circleCount),
-                            center = center,
-                            style = Stroke(width = 2f)
-                        )
-                    }
-
-                    // Draw radar lines
-                    drawLine(
-                        color = Color.Green.copy(alpha = 0.3f),
-                        start = Offset(center.x - maxRadius, center.y),
-                        end = Offset(center.x + maxRadius, center.y),
-                        strokeWidth = 2f
-                    )
-                    drawLine(
-                        color = Color.Green.copy(alpha = 0.3f),
-                        start = Offset(center.x, center.y - maxRadius),
-                        end = Offset(center.x, center.y + maxRadius),
-                        strokeWidth = 2f
-                    )
-
-                    // Draw sweep line
-                    val sweepRad = (sweepAngle.toDouble() * PI / 180.0).toFloat()
-                    val sweepX = center.x + maxRadius * cos(sweepRad.toDouble()).toFloat()
-                    val sweepY = center.y + maxRadius * sin(sweepRad.toDouble()).toFloat()
-
-                    drawLine(
-                        color = Color.Green.copy(alpha = 0.5f),
-                        start = center,
-                        end = Offset(sweepX, sweepY),
-                        strokeWidth = 4f
-                    )
-
-                    // Draw all devices (Wi-Fi and Bluetooth)
-                    devicesList.forEach { device ->
-                        val normalized =
-                            ((device.signal + 100)
-                                .coerceIn(0, 100))
-                                .toFloat() / 100f
-
-                        val radius =
-                            (size.minDimension / 2.2f) *
-                            (1f - normalized)
-
-                        val angle = Math.toRadians(device.radarAngle.toDouble())
-
-                        val x = center.x + radius * cos(angle).toFloat()
-                        val y = center.y + radius * sin(angle).toFloat()
-
-                        val color = if (device.type == com.sophia.ops.model.DeviceType.WIFI) {
-                            // Wi-Fi Color based on risk score (0 = Green, 100 = Red)
-                            Color(
-                                red = (device.riskScore / 100f).coerceIn(0f, 1f),
-                                green = (1f - (device.riskScore / 100f)).coerceIn(0f, 1f),
-                                blue = 0f
-                            )
-                        } else {
-                            // Bluetooth Color
-                            if (device.favourite) {
-                                Color.Yellow
-                            } else {
-                                Color(
-                                    red = (device.riskScore / 100f).coerceIn(0f, 1f),
-                                    green = 0f,
-                                    blue = (1f - (device.riskScore / 100f)).coerceIn(0.5f, 1f)
-                                )
-                            }
-                        }
-
-                        drawCircle(
-                            color = color,
-                            radius = if (device.favourite || device.type == com.sophia.ops.model.DeviceType.WIFI) 8.dp.toPx() else 6.dp.toPx(),
-                            center = Offset(x, y)
-                        )
-                    }
-                }
+        InteractiveRadarDisplay(
+            vm = vm,
+            devices = devicesList,
         )
-
 
         // Today's Activity Section
         Column(
@@ -309,102 +201,10 @@ fun RadarScreen(
                 .fillMaxWidth()
                 .padding(top = 16.dp)
         ) {
-            Text(
-                text = "Signal History",
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White.copy(alpha = 0.7f)
-            )
-            
-            Spacer(modifier = Modifier.size(8.dp))
-            
-            if (vm.bluetoothDevices.isEmpty()) {
-                Text(
-                    text = "No signals detected yet...",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
-                )
-            } else {
-                val context = LocalContext.current
-                // Show last 3 devices for brevity, or a scrollable list
-                vm.bluetoothDevices.takeLast(3).reversed().forEach { device ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable {
-                                    vm.selectBluetoothDevice(device)
-                                }
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                val (riskText, riskColor) = when {
-                                    device.riskScore > 50 -> "🔴 High" to Color.Red
-                                    device.riskScore > 20 -> "🟠 Medium" to Color.Yellow
-                                    else -> "🟢 Low" to Color.Green
-                                }
-                                
-                                Text(
-                                    text = riskText,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = riskColor,
-                                    modifier = Modifier.padding(end = 8.dp)
-                                )
-
-                                val vendor = remember(device.address) {
-                                    OuiLookup.getVendor(context, device.address)
-                                }
-                                val displayName = when {
-                                    !device.nickname.isNullOrBlank() -> device.nickname
-                                    !device.name.isNullOrBlank() && !device.name.startsWith("Discovered Device") && !device.name.contains("Unknown", true) -> device.name
-                                    vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)" -> vendor
-                                    else -> "Unknown Bluetooth Device"
-                                }
-                                
-                                Text(
-                                    text = displayName,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = Color.White
-                                )
-                                device.notes?.let { note ->
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    AssistChip(
-                                        onClick = { },
-                                        label = { Text(note, style = MaterialTheme.typography.labelSmall) },
-                                        modifier = Modifier.height(20.dp)
-                                    )
-                                }
-                            }
-                            Text(
-                                text = device.address,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.Gray
-                            )
-                        }
-                        
-                        Row {
-                            device.signalHistory.takeLast(5).forEach { point ->
-                                Text(
-                                    text = point.rssi.toString(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = when {
-                                        point.rssi > -60 -> Color.Green
-                                        point.rssi > -80 -> Color.Yellow
-                                        else -> Color.Red
-                                    },
-                                    modifier = Modifier.padding(horizontal = 2.dp)
-                                )
-                            }
-                        }
-                    }
-                }
+            if (vm.signalHistoryVisible) {
+                SignalHistoryPanel(vm)
+                Spacer(modifier = Modifier.height(16.dp))
             }
-
-            Spacer(modifier = Modifier.size(16.dp))
 
             Text(
                 text = "Today's Activity",
@@ -541,7 +341,7 @@ fun RadarScreen(
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00838F)),
                                 enabled = !vm.isAnalyzing && vm.isAiReady
                             ) {
-                                Text("GLOBAL INTEL", color = Color.White)
+                                Text("GUIDANCE", color = Color.White)
                             }
                         }
                         Spacer(modifier = Modifier.height(4.dp))
@@ -625,6 +425,39 @@ fun RadarScreen(
                         color = Color.White.copy(alpha = 0.7f)
                     )
 
+                    val disposition = vm.deviceDisposition(device.address)
+                    Text(
+                        text = "Review state: ${disposition.name.lowercase().replaceFirstChar { it.uppercase() }}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = when (disposition) {
+                            DeviceDisposition.TRUSTED -> Color(0xFF72F5B2)
+                            DeviceDisposition.WATCHLIST -> Color(0xFFFFD166)
+                            DeviceDisposition.UNREVIEWED -> Color.LightGray
+                        },
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Button(
+                            onClick = { vm.setDeviceDisposition(device.address, DeviceDisposition.TRUSTED) },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF176B48)),
+                        ) { Text("TRUST") }
+                        Button(
+                            onClick = { vm.setDeviceDisposition(device.address, DeviceDisposition.WATCHLIST) },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF825D18)),
+                        ) { Text("WATCH") }
+                        TextButton(
+                            onClick = { vm.setDeviceDisposition(device.address, DeviceDisposition.UNREVIEWED) },
+                            modifier = Modifier.weight(0.7f),
+                        ) { Text("CLEAR") }
+                    }
+
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -694,66 +527,39 @@ fun RadarScreen(
             }
         }
 
-        // AI Analyst Section
-        if (vm.aiResponse != null || vm.isAnalyzing) {
+        // Structured local assessment
+        if (vm.aiAssessment != null || vm.aiResponse != null || vm.isAnalyzing) {
             Spacer(modifier = Modifier.height(24.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Cyber Analyst Countermeasures",
+                    text = "Local Assessment",
                     style = MaterialTheme.typography.titleMedium,
-                    color = Color.Green,
-                    modifier = Modifier.weight(1f)
+                    color = Color(0xFF72F5B2),
+                    modifier = Modifier.weight(1f),
                 )
-                
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(
-                        onClick = { vm.analyzeThreat() },
-                        enabled = !vm.isAnalyzing
-                    ) {
-                        Text("LOCAL", color = Color.Green, style = MaterialTheme.typography.labelSmall)
-                    }
-                    TextButton(
-                        onClick = { vm.performGlobalIntelligenceSearch() },
-                        enabled = !vm.isAnalyzing && vm.isAiReady
-                    ) {
-                        Text("GLOBAL", color = Color(0xFF00BCD4), style = MaterialTheme.typography.labelSmall)
-                    }
+                TextButton(onClick = { vm.analyzeThreat() }, enabled = !vm.isAnalyzing) {
+                    Text("REFRESH", color = Color(0xFF72F5B2), style = MaterialTheme.typography.labelSmall)
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = Color.Red.copy(alpha = 0.1f)
-                )
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    if (vm.isAnalyzing) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                color = Color.Green,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = "Analyzing signals and generating strategies...",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.Gray
-                            )
-                        }
-                    } else {
-                        Text(
-                            text = vm.aiResponse ?: "",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White
-                        )
-                    }
+            if (vm.isAnalyzing) {
+                AnalystLoadingCard()
+            } else {
+                vm.aiAssessment?.let { assessment -> StructuredAssessmentCard(assessment) } ?: Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19)),
+                ) {
+                    Text(
+                        text = vm.aiResponse ?: "No assessment is available.",
+                        modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White,
+                    )
                 }
             }
         }
@@ -786,6 +592,150 @@ fun RadarScreen(
                 }
             }
         }
+    }
+}
+
+
+@Composable
+private fun SignalHistoryPanel(vm: DashboardViewModel) {
+    val context = LocalContext.current
+    val devices = vm.bluetoothDevices
+        .sortedByDescending { it.lastSeen }
+        .take(vm.signalHistoryLimit)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19)),
+        border = BorderStroke(1.dp, Color(0xFF45F08A).copy(alpha = 0.25f)),
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Signal History",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color(0xFF45F08A),
+                )
+                Text(
+                    text = "Persisted",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF7DEEFF),
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (devices.isEmpty()) {
+                Text(
+                    text = "No saved signals yet. Run a scan to begin the timeline.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray,
+                )
+            } else {
+                devices.forEach { device ->
+                    val vendor = remember(device.address) { OuiLookup.getVendor(context, device.address) }
+                    val displayName = when {
+                        !device.nickname.isNullOrBlank() -> device.nickname
+                        !device.name.isNullOrBlank() && !device.name.startsWith("Discovered Device") && !device.name.contains("Unknown", true) -> device.name
+                        vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)" -> vendor
+                        else -> "Unknown Bluetooth Device"
+                    }
+                    val latestRssi = device.signalHistory.lastOrNull()?.rssi ?: device.rssi
+                    val riskColor = when {
+                        device.riskScore > 50 -> Color(0xFFFF6161)
+                        device.riskScore > 20 -> Color(0xFFFFD166)
+                        else -> Color(0xFF45F08A)
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { vm.selectBluetoothDevice(device) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        SignalSparkline(
+                            points = device.signalHistory.map { it.rssi },
+                            color = riskColor,
+                            modifier = Modifier
+                                .width(74.dp)
+                                .height(28.dp),
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = displayName,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = Color.White,
+                                maxLines = 1,
+                            )
+                            Text(
+                                text = "${DateUtils.getRelativeTimeSpanString(device.lastSeen)}  •  ${device.signalHistory.size} samples",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray,
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "$latestRssi dBm",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = riskColor,
+                            )
+                            Text(
+                                text = "Risk ${device.riskScore}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = riskColor.copy(alpha = 0.75f),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SignalSparkline(
+    points: List<Int>,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        if (points.isEmpty()) {
+            drawLine(
+                color = Color.Gray.copy(alpha = 0.35f),
+                start = Offset(0f, size.height / 2f),
+                end = Offset(size.width, size.height / 2f),
+                strokeWidth = 2f,
+            )
+            return@Canvas
+        }
+
+        val minRssi = -100f
+        val maxRssi = -30f
+        val step = if (points.size == 1) 0f else size.width / (points.size - 1)
+        points.forEachIndexed { index, value ->
+            if (index == 0) return@forEachIndexed
+            val previous = points[index - 1]
+            val x1 = step * (index - 1)
+            val x2 = step * index
+            val y1 = size.height - ((previous.coerceIn(-100, -30) - minRssi) / (maxRssi - minRssi)) * size.height
+            val y2 = size.height - ((value.coerceIn(-100, -30) - minRssi) / (maxRssi - minRssi)) * size.height
+            drawLine(
+                color = color,
+                start = Offset(x1, y1),
+                end = Offset(x2, y2),
+                strokeWidth = 2.5f,
+                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            )
+        }
+        val finalValue = points.last().coerceIn(-100, -30)
+        val finalY = size.height - ((finalValue - minRssi) / (maxRssi - minRssi)) * size.height
+        drawCircle(color = color, radius = 3.5f, center = Offset(size.width, finalY))
     }
 }
 
@@ -891,6 +841,149 @@ fun AskSophiaCard(vm: DashboardViewModel) {
                 Spacer(Modifier.height(12.dp))
                 Text(answer, style = MaterialTheme.typography.bodyMedium, color = Color.White)
             }
+        }
+    }
+}
+
+@Composable
+private fun AnalystLoadingCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19)),
+        border = BorderStroke(1.dp, Color(0xFF72F5B2).copy(alpha = 0.35f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                color = Color(0xFF72F5B2),
+                strokeWidth = 2.dp,
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = "Comparing the current scan with the local baseline…",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StructuredAssessmentCard(assessment: AiAssessment) {
+    val severityColor = when (assessment.severity) {
+        AssessmentSeverity.CRITICAL -> Color(0xFFFF5252)
+        AssessmentSeverity.HIGH -> Color(0xFFFF8A65)
+        AssessmentSeverity.MEDIUM -> Color(0xFFFFD166)
+        AssessmentSeverity.LOW -> Color(0xFF72F5B2)
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19)),
+        border = BorderStroke(1.dp, severityColor.copy(alpha = 0.5f)),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = assessment.severity.name,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = severityColor,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "Confidence: ${assessment.confidence.name.lowercase().replaceFirstChar { it.uppercase() }}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFFB9FFD9),
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = assessment.headline,
+                style = MaterialTheme.typography.bodyLarge,
+                color = Color.White,
+                fontWeight = FontWeight.Medium,
+            )
+
+            AssessmentSection("Evidence") {
+                assessment.evidence.forEach { item ->
+                    EvidenceRow(item.label, item.detail, Color(0xFF8EDBFF))
+                }
+            }
+            AssessmentSection("What changed") {
+                assessment.changes.forEach { item ->
+                    EvidenceRow(item.label, item.detail, Color(0xFF72F5B2))
+                }
+            }
+            AssessmentSection("Uncertainty") {
+                Text(
+                    text = assessment.uncertainty,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFFFD166),
+                )
+            }
+            AssessmentSection("Recommended next step") {
+                Text(
+                    text = assessment.recommendedAction,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White,
+                )
+                if (assessment.requiresConfirmation) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Review required before taking any action that changes a device or connection.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFB9FFD9),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AssessmentSection(
+    title: String,
+    content: @Composable () -> Unit,
+) {
+    Spacer(modifier = Modifier.height(14.dp))
+    Text(
+        text = title.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        color = Color(0xFF72F5B2),
+        fontWeight = FontWeight.Bold,
+    )
+    Spacer(modifier = Modifier.height(5.dp))
+    content()
+}
+
+@Composable
+private fun EvidenceRow(label: String, detail: String, accent: Color) {
+    Row(modifier = Modifier.padding(vertical = 3.dp)) {
+        Text(
+            text = "•",
+            color = accent,
+            modifier = Modifier.padding(end = 6.dp),
+        )
+        Column {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = accent,
+            )
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.LightGray,
+            )
         }
     }
 }

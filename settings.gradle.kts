@@ -24,4 +24,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "S0PHIA OPS"
 include(":app")
- 

@@ -43,32 +43,45 @@ class SecureActionAgent(
     fun assessTacticalConcern(
         primaryConcern: String,
         environment: String,
-        threatLevel: Int
+        threatLevel: Int,
+        evidence: List<AssessmentEvidence> = emptyList(),
+        changes: List<ScanChange> = emptyList(),
     ): AiAnalysisResult {
-        val action = when {
-            threatLevel > 70 -> "Investigate the flagged device(s) immediately and consider blocking unfamiliar high-risk devices from your network."
-            threatLevel > 30 -> "Review recently detected devices and confirm you recognize them."
-            else -> "No action needed — continue routine monitoring."
-        }
-
         val severity = when {
-            threatLevel > 70 -> AssessmentSeverity.HIGH
-            threatLevel > 30 -> AssessmentSeverity.MEDIUM
+            threatLevel >= 85 -> AssessmentSeverity.CRITICAL
+            threatLevel >= 60 -> AssessmentSeverity.HIGH
+            threatLevel >= 30 -> AssessmentSeverity.MEDIUM
             else -> AssessmentSeverity.LOW
         }
-        val conf = if (threatLevel > 50) AssessmentConfidence.HIGH else AssessmentConfidence.MEDIUM
+        val confidence = when {
+            evidence.size >= 3 && changes.isNotEmpty() -> AssessmentConfidence.HIGH
+            evidence.isNotEmpty() -> AssessmentConfidence.MEDIUM
+            else -> AssessmentConfidence.LOW
+        }
+        val action = when (severity) {
+            AssessmentSeverity.CRITICAL,
+            AssessmentSeverity.HIGH -> "Open the flagged device details, verify whether it is recognized, and choose a follow-up action only after review."
+            AssessmentSeverity.MEDIUM -> "Review the recorded changes and mark familiar devices as trusted if you can confirm them."
+            AssessmentSeverity.LOW -> "No immediate action is needed. Keep monitoring for repeat observations or meaningful changes."
+        }
+        val uncertainty = when {
+            evidence.isEmpty() -> "No supporting device evidence is available yet; this assessment is provisional."
+            environment.contains("Low-Noise", ignoreCase = true) -> "Radio metadata shows proximity and change patterns, but cannot establish ownership, identity, or intent."
+            else -> "Radio metadata can indicate change and proximity, but cannot establish ownership, identity, or malicious intent."
+        }
 
-        val assessment = AiAssessment(
-            severity = severity,
-            confidence = conf,
-            headline = primaryConcern,
-            evidence = emptyList(),
-            changes = emptyList(),
-            uncertainty = "Analyzed by tactical heuristic agent.",
-            recommendedAction = action,
-            requiresConfirmation = threatLevel > 70
+        return AiAnalysisResult(
+            assessment = AiAssessment(
+                severity = severity,
+                confidence = confidence,
+                headline = primaryConcern,
+                evidence = evidence.take(5),
+                changes = changes.take(5),
+                uncertainty = uncertainty,
+                recommendedAction = action,
+                requiresConfirmation = severity >= AssessmentSeverity.MEDIUM,
+            ),
         )
-        return AiAnalysisResult(assessment)
     }
 
     @Synchronized

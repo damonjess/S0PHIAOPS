@@ -3,37 +3,24 @@ package com.sophia.ops.bluetooth
 object BluetoothRiskEngine {
 
     /**
-     * Calculates risk based on persistence and proximity.
-     * Transient devices (seen once) or those with weak signal are dropped to zero.
+     * Calculates risk from local persistence and proximity. User tuning only
+     * adjusts the score and signal boundary; raw observations are unchanged.
      */
     fun calculate(
         name: String?,
         rssi: Int,
-        timesSeen: Int
+        timesSeen: Int,
+        sensitivityAdjustment: Int = 0,
+        proximityThreshold: Int = -55,
     ): Int {
-        // Persistence Metric: Only escalate if seen in 3+ intervals
-        // Signal Saturation: RSSI must be greater than -70 dBm
-        if (timesSeen < 3 || rssi < -70) {
-            return 0
-        }
+        val tunedProximity = proximityThreshold.coerceIn(-75, -40)
+        if (timesSeen < 3 || rssi < tunedProximity - 15) return 0
 
-        var score = 20 // Baseline for persistent proximity
+        var score = 20
+        if (name.isNullOrBlank() || name.contains("Unknown", true)) score += 25
+        if (rssi > tunedProximity) score += 35
+        if (timesSeen > 10) score += 10
 
-        // If the device has no name or a generic name, it's more suspicious
-        if (name.isNullOrBlank() || name.contains("Unknown", true)) {
-            score += 25
-        }
-
-        // Proximity scaling
-        if (rssi > -55) {
-            score += 35
-        }
-
-        // Additional boost for long-term persistent devices
-        if (timesSeen > 10) {
-            score += 10
-        }
-
-        return score.coerceIn(0, 100)
+        return (score + sensitivityAdjustment.coerceIn(-20, 20)).coerceIn(0, 100)
     }
 }

@@ -1,6 +1,9 @@
 package com.sophia.ops.viewmodel
 
 import android.app.Application
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -10,6 +13,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.room.Room
 import com.sophia.ops.data.db.SophiaDatabase
 import com.sophia.ops.data.entities.ScanSession
+import com.sophia.ops.data.IncidentRecord
+import com.sophia.ops.data.InvestigationStore
+import com.sophia.ops.data.IncidentStatus
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -27,6 +33,10 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
     private val db = SophiaDatabase.getInstance(application)
 
     private val scanSessionDao = db.scanSessionDao()
+    private val investigationStore = InvestigationStore(application)
+
+    var incidents by mutableStateOf<List<IncidentRecord>>(investigationStore.loadIncidents())
+        private set
 
     val sessions: StateFlow<List<ScanSession>> = scanSessionDao.getAll()
         .stateIn(
@@ -34,6 +44,15 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
         )
+
+    fun refreshIncidents() {
+        incidents = investigationStore.loadIncidents()
+    }
+
+    fun updateIncidentStatus(id: String, status: IncidentStatus) {
+        investigationStore.updateIncidentStatus(id, status)
+        refreshIncidents()
+    }
 
     fun exportCsv(context: Context) {
         if (sessions.value.isEmpty()) {
@@ -118,6 +137,84 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun generateIncidentPdf(context: Context, incident: IncidentRecord) {
+        val pdfDocument = PdfDocument()
+        val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create()
+        val page = pdfDocument.startPage(pageInfo)
+        val canvas: Canvas = page.canvas
+        val paint = Paint().apply { color = android.graphics.Color.BLACK }
+        val timestampFormat = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+        var y = 48f
+
+        fun section(title: String, body: String) {
+            paint.textSize = 13f
+            paint.isFakeBoldText = true
+            canvas.drawText(title, 42f, y, paint)
+            y += 18f
+            paint.textSize = 11f
+            paint.isFakeBoldText = false
+            wrapForPdf(body, paint, 500f).take(12).forEach { line ->
+                if (y <= 800f) {
+                    canvas.drawText(line, 42f, y, paint)
+                    y += 15f
+                }
+            }
+            y += 10f
+        }
+
+        paint.textSize = 22f
+        paint.isFakeBoldText = true
+        canvas.drawText("S0PHIA OPS - Local Incident Report", 42f, y, paint)
+        y += 32f
+        paint.textSize = 11f
+        paint.isFakeBoldText = false
+        canvas.drawText("Generated: ${timestampFormat.format(Date())}", 42f, y, paint)
+        y += 24f
+        canvas.drawText("Incident time: ${timestampFormat.format(Date(incident.createdAt))}", 42f, y, paint)
+        y += 24f
+        canvas.drawText("Severity: ${incident.severity.name}    Status: ${incident.status.name}", 42f, y, paint)
+        y += 28f
+
+        section("Assessment", incident.headline)
+        section("Evidence", incident.evidenceSummary.ifBlank { "No compact evidence summary was stored." })
+        section("Observed changes", incident.changeSummary.ifBlank { "No material scan change was recorded." })
+        section("Recommended next step", incident.recommendedAction)
+        section("Response record", buildString {
+            append("Status: ${incident.status.name}")
+            incident.acknowledgedAt?.let { append(" · Acknowledged: ${timestampFormat.format(Date(it))}") }
+            incident.resolvedAt?.let { append(" · Resolved: ${timestampFormat.format(Date(it))}") }
+            append(". This report reflects local radio observations and does not establish ownership, identity, or intent.")
+        })
+
+        pdfDocument.finishPage(page)
+        val file = File(context.cacheDir, "sophia_ops_incident_${incident.createdAt}.pdf")
+        try {
+            pdfDocument.writeTo(FileOutputStream(file))
+            shareFile(context, file, "application/pdf")
+        } catch (e: Exception) {
+            Log.e("INCIDENT_REPORT", "Failed to generate incident PDF", e)
+        } finally {
+            pdfDocument.close()
+        }
+    }
+
+    private fun wrapForPdf(text: String, paint: Paint, maxWidth: Float): List<String> {
+        if (text.isBlank()) return listOf("")
+        val lines = mutableListOf<String>()
+        var line = ""
+        text.replace("\n", " ").split(Regex("\\s+")).forEach { word ->
+            val candidate = if (line.isBlank()) word else "$line $word"
+            if (paint.measureText(candidate) <= maxWidth) {
+                line = candidate
+            } else {
+                if (line.isNotBlank()) lines += line
+                line = word
+            }
+        }
+        if (line.isNotBlank()) lines += line
+        return lines
+    }
+
     private fun shareFile(
         context: Context,
         file: File,
@@ -165,6 +262,8 @@ class HistoryViewModel(application: Application) : AndroidViewModel(application)
     fun clearHistory() {
         viewModelScope.launch {
             scanSessionDao.deleteAllSessions()
+            investigationStore.clearIncidents()
+            incidents = emptyList()
         }
     }
 }
