@@ -6,6 +6,10 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
-    <!-- Local investigation baselines are intentionally not included in backups. -->
+    <!-- Sensitive device scan data must not be backed up -->
+    <exclude domain="database" path="sophia-db" />
     <exclude domain="sharedpref" path="sophia_device_profiles.xml" />
+    <exclude domain="sharedpref" path="sophia_investigation_store.xml" />
+    <exclude domain="sharedpref" path="sophia_risk_tuning.xml" />
+    <exclude domain="sharedpref" path="radar_preferences.xml" />
 </full-backup-content>

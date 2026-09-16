@@ -20,9 +20,12 @@ android {
 
     buildTypes {
         release {
-            optimization {
-                enable = false
-            }
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
     compileOptions {
@@ -31,6 +34,15 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+        }
+    }
+    lint {
+        baseline = file("lint-baseline.xml")
+        abortOnError = false
     }
 }
 
@@ -66,4 +78,9 @@ dependencies {
     // Testing with Mockito
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.1.0")
     testImplementation("org.mockito:mockito-core:5.1.1")
+    testImplementation("org.json:json:20240303")
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }

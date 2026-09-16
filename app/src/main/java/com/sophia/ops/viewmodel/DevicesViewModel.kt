@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sophia.ops.data.db.SophiaDatabase
 import com.sophia.ops.data.OuiLookup
+import com.sophia.ops.utils.DeviceDisplayName
 import com.sophia.ops.model.DeviceType
 import com.sophia.ops.model.NetworkDevice
 import kotlinx.coroutines.flow.SharingStarted
@@ -26,11 +27,7 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
         val btList = bluetoothDevices.filter { !it.ignored }.map { entity ->
             val vendor = OuiLookup.getVendor(getApplication(), entity.address)
             val rawName = entity.nickname ?: entity.name
-            val displayName = when {
-                !rawName.isNullOrBlank() && !rawName.startsWith("Discovered Device") && !rawName.contains("Unknown", true) -> rawName
-                vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)" -> vendor
-                else -> "Unknown Bluetooth Device"
-            }
+            val displayName = DeviceDisplayName.forBluetooth(rawName, vendor)
 
             NetworkDevice(
                 id = entity.address,
@@ -46,15 +43,7 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
 
         val wifiList = wifiNetworks.map { network ->
             val vendor = OuiLookup.getVendor(getApplication(), network.bssid)
-            val displayName = if (network.ssid.isBlank() || network.ssid == "<unknown ssid>") {
-                if (vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)") {
-                    vendor
-                } else {
-                    "Hidden Network"
-                }
-            } else {
-                network.ssid
-            }
+            val displayName = DeviceDisplayName.forWifi(network.ssid, vendor)
 
             NetworkDevice(
                 id = network.bssid,
@@ -101,7 +90,9 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
     fun toggleIgnored(device: NetworkDevice) {
         if (device.type == DeviceType.BLUETOOTH) {
             viewModelScope.launch {
-                bluetoothDao.updateIgnored(device.address, true)
+                val current = bluetoothDao.getDeviceByAddress(device.address)
+                val newIgnored = current?.ignored != true
+                bluetoothDao.updateIgnored(device.address, newIgnored)
             }
         }
     }

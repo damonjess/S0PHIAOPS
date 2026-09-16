@@ -26,6 +26,7 @@ import com.sophia.ops.data.db.SophiaDatabase
 import com.sophia.ops.bluetooth.BluetoothScanner
 import com.sophia.ops.bluetooth.BluetoothRiskEngine
 import com.sophia.ops.wifi.RiskEngine
+import com.sophia.ops.utils.DeviceDisplayName
 import com.sophia.ops.wifi.WifiScanner
 import com.sophia.ops.model.NetworkDevice
 import com.sophia.ops.model.DeviceType
@@ -57,6 +58,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -65,7 +67,6 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.math.abs
-import kotlin.random.Random
 import kotlin.jvm.Volatile
 
 class DashboardViewModel(
@@ -149,8 +150,9 @@ class DashboardViewModel(
 
     private fun checkModelExists() {
         viewModelScope.launch(Dispatchers.IO) {
-            val exists = File("${getApplication<Application>().filesDir}/model.task").exists() || 
-                         File("/data/local/tmp/llm/model.task").exists()
+            val app = getApplication<Application>()
+            val exists = File("${app.filesDir}/model.task").exists() ||
+                         File("${app.getExternalFilesDir(null)}/model.task").exists()
             withContext(Dispatchers.Main) {
                 isModelPresent = exists
             }
@@ -293,10 +295,7 @@ class DashboardViewModel(
 
             val candidateModelPaths = listOf(
                 "${getApplication<Application>().filesDir}/model.task",
-                "/data/local/tmp/llm/model.task",
-                "/sdcard/Download/model.task",
-                "/sdcard/Downloads/model.task",
-                "/storage/emulated/0/Download/model.task"
+                "${getApplication<Application>().getExternalFilesDir(null)}/model.task"
             )
 
             val targetPath = candidateModelPaths.find { File(it).exists() }
@@ -324,7 +323,7 @@ class DashboardViewModel(
                         Log.i(tag, "SecureActionAgent initialized successfully.")
                         tacticalAgent = agent
                         aiInitializationFailed = false
-                        aiAdviceText = "SOPHIA AI Engine Online. Awaiting threat metrics..."
+                        aiAdviceText = "SOPHIA rule-based assessment active. Local chat AI available when model is loaded."
                     } else {
                         Log.e(tag, "SecureActionAgent reports failure during initialization.")
                         aiInitializationFailed = true
@@ -343,7 +342,10 @@ class DashboardViewModel(
         }
     }
 
-    fun downloadModel(modelUrl: String = "https://storage.googleapis.com/mediapipe-models/llm/gemma-2b-it-cpu-int4.task") {
+    fun downloadModel(
+        modelUrl: String = "https://storage.googleapis.com/mediapipe-models/llm/gemma-2b-it-cpu-int4.task",
+        expectedSha256: String = EXPECTED_MODEL_SHA256
+    ) {
         if (isDownloading) return
         
         viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
@@ -393,6 +395,18 @@ class DashboardViewModel(
                 }
 
                 require(temporaryFile.length() >= 50L * 1024L * 1024L) { "Downloaded model is unexpectedly small and was rejected." }
+
+                // Verify SHA-256 checksum if one is configured
+                if (expectedSha256.isNotBlank()) {
+                    val computedHash = computeSha256(temporaryFile)
+                    require(computedHash.equals(expectedSha256, ignoreCase = true)) {
+                        "Model checksum mismatch: expected $expectedSha256 but got $computedHash"
+                    }
+                    Log.i(tag, "Model checksum verified: $computedHash")
+                } else {
+                    Log.w(tag, "No expected SHA-256 configured. Computed hash: ${computeSha256(temporaryFile)}")
+                }
+
                 if (targetFile.exists() && !targetFile.delete()) {
                     throw IllegalStateException("Existing model could not be replaced.")
                 }
@@ -417,6 +431,27 @@ class DashboardViewModel(
             } finally {
                 connection?.disconnect()
             }
+        }
+    }
+
+    /**
+     * Expected SHA-256 hash of the downloaded model file.
+     * Leave empty to skip checksum validation (logs the computed hash instead).
+     * Set to the actual hash to enforce integrity verification.
+     */
+    companion object {
+        const val EXPECTED_MODEL_SHA256 = ""
+
+        fun computeSha256(file: File): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(8 * 1024)
+                var read: Int
+                while (input.read(buffer).also { read = it } != -1) {
+                    digest.update(buffer, 0, read)
+                }
+            }
+            return digest.digest().joinToString("") { "%02x".format(it) }
         }
     }
 
@@ -730,10 +765,38 @@ class DashboardViewModel(
     }
 
     fun performGlobalIntelligenceSearch() {
-        // This build deliberately does not imply a live threat-intelligence feed.
-        // External enrichment belongs behind an explicit, cited connector in a later release.
-        aiAdviceText = "Offline guidance only: no live intelligence source is connected."
-        aiResponse = "This analyst is using local scan evidence only. A future verified intelligence connector will show its source and retrieval time before it can enrich an assessment."
+        // Local guidance summary based on current scan data.
+        // A future verified intelligence connector can enrich this with cited external data.
+        val wifiCount = networks.size
+        val btCount = bluetoothDevices.size
+        val totalDevices = wifiCount + btCount
+
+        val guidance = buildString {
+            append("Local Guidance Report\n\n")
+            append("Scan Summary: $wifiCount Wi-Fi network(s) and $btCount Bluetooth device(s) detected.\n")
+            append("Overall Threat Score: $threatScore/100.\n\n")
+
+            val topWifi = networks.maxByOrNull { it.riskScore }
+            if (topWifi != null && topWifi.riskScore > 0) {
+                append("Highest-Risk Wi-Fi: ${topWifi.ssid.ifBlank { "Hidden Network" }} (${topWifi.riskScore}/100)\n")
+            }
+
+            val topBt = bluetoothDevices.maxByOrNull { it.riskScore }
+            if (topBt != null && topBt.riskScore > 0) {
+                val name = topBt.nickname ?: topBt.name ?: "Unknown Device"
+                append("Highest-Risk Bluetooth: $name (${topBt.riskScore}/100)\n")
+            }
+
+            val openWifi = networks.count { !it.security.contains("WPA", ignoreCase = true) && !it.security.contains("WEP", ignoreCase = true) }
+            if (openWifi > 0) {
+                append("Open Networks: $openWifi unsecured Wi-Fi network(s) detected.\n")
+            }
+
+            append("\nNote: This guidance is generated from local scan data only. No external intelligence source is connected.")
+        }
+
+        aiAdviceText = guidance
+        aiResponse = guidance
         isAnalyzing = false
     }
 
@@ -812,13 +875,11 @@ class DashboardViewModel(
     private fun BluetoothDeviceEntity.toNetworkDevice(app: Application): NetworkDevice {
         val baseAngle = (this.address.hashCode().toFloat() % 360f)
         val vendor = OuiLookup.getVendor(app, this.address)
-        
-        val rawName = this.nickname ?: this.name
-        val displayName = when {
-            !rawName.isNullOrBlank() && !rawName.startsWith("Discovered Device") && !rawName.contains("Unknown", true) -> rawName
-            vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)" -> vendor
-            else -> "Unknown Bluetooth Device"
-        }
+
+        val displayName = DeviceDisplayName.forBluetooth(
+            rawName = this.nickname ?: this.name,
+            vendor = vendor
+        )
 
         return NetworkDevice(
             id = this.address,
@@ -840,16 +901,11 @@ class DashboardViewModel(
     private fun WifiNetwork.toNetworkDevice(app: Application): NetworkDevice {
         val baseAngle = (this.bssid.hashCode().toFloat() % 360f)
         val vendor = OuiLookup.getVendor(app, this.bssid)
-        
-        val displayName = if (this.ssid.isBlank() || this.ssid == "<unknown ssid>") {
-            if (vendor != "Unknown Vendor" && vendor != "Private Address (Randomized)") {
-                vendor
-            } else {
-                "Hidden Network"
-            }
-        } else {
-            this.ssid
-        }
+
+        val displayName = DeviceDisplayName.forWifi(
+            ssid = this.ssid,
+            vendor = vendor
+        )
 
         return NetworkDevice(
             id = this.bssid,
@@ -1229,9 +1285,7 @@ class DashboardViewModel(
                 viewModelScope.launch {
                     isBluetoothScanning = false
                     isScanning = isWifiScanning || isBluetoothScanning
-                    if (!isScanning && lastScanWasLive && !scanCanceledByUser) {
-                        scanStatusMessage = "Scan complete. ${networks.size} Wi-Fi and ${bluetoothDevices.size} Bluetooth device(s) available."
-                    }
+                    completeScanIfFinished()
                     Log.i(tag, "Bluetooth discovery finished.")
                 }
             },
@@ -1258,11 +1312,11 @@ class DashboardViewModel(
                 WifiNetwork(
                     ssid = @Suppress("DEPRECATION") it.SSID,
                     bssid = it.BSSID,
-                    signal = it.level + Random.nextInt(-1, 2),
+                    signal = it.level,
                     security = it.capabilities,
                     riskScore = risk,
                     timestamp = System.currentTimeMillis(),
-                    angularOffset = (Random.nextFloat() * 10f) - 5f
+                    angularOffset = 0f
                 )
             }
 
@@ -1277,16 +1331,13 @@ class DashboardViewModel(
                 withContext(Dispatchers.IO) {
                     try {
                         wifiDao.insertAll(updatedList)
-                        saveScanSession()
-                        if (autoAnalystEnabled && shouldTriggerAiAnalysis()) {
-                            analyzeThreat(fromLiveScan = true)
-                        }
                     } catch (e: Exception) {
                         Log.e(tag, "Failed to persist WiFi networks", e)
                     } finally {
                         withContext(Dispatchers.Main) {
                             isWifiScanning = false
                             isScanning = isWifiScanning || isBluetoothScanning
+                            completeScanIfFinished()
                         }
                     }
                 }
@@ -1325,29 +1376,22 @@ class DashboardViewModel(
         }
     }
 
-    private fun fuzzExistingSignals() {
-        if (networks.isEmpty()) return
-        
-        viewModelScope.launch {
-            isThrottled = true 
-            lastScanWasLive = false
-            
-            Log.d(tag, "Applying aggressive signal fuzz to keep radar alive.")
-            val currentList = networks
-            for (i in currentList.indices) {
-                val net = currentList[i]
-                val newSignal = net.signal + Random.nextInt(-2, 3) 
-                val newAngle = net.angularOffset + (Random.nextFloat() * 4f - 2f)
-                
-                currentList[i] = net.copy(
-                    signal = newSignal.coerceIn(-100, -20),
-                    angularOffset = newAngle.coerceIn(-15f, 15f),
-                    timestamp = System.currentTimeMillis() 
-                )
-            }
+    /**
+     * Called after each scan leg (Wi-Fi or Bluetooth) completes.
+     * When both are finished, saves the scan session and triggers AI analysis.
+     */
+    private fun completeScanIfFinished() {
+        if (isWifiScanning || isBluetoothScanning) return
+        if (scanCanceledByUser) return
 
-            delay(1000.milliseconds)
-            isThrottled = false
+        viewModelScope.launch {
+            if (lastScanWasLive) {
+                scanStatusMessage = "Scan complete. ${networks.size} Wi-Fi and ${bluetoothDevices.size} Bluetooth device(s) available."
+            }
+            saveScanSession()
+            if (autoAnalystEnabled && shouldTriggerAiAnalysis()) {
+                analyzeThreat(fromLiveScan = true)
+            }
         }
     }
 

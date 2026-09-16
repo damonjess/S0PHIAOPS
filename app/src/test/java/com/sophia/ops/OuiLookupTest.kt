@@ -1,46 +1,86 @@
 package com.sophia.ops
 
-import android.content.Context
-import android.content.res.AssetManager
 import com.sophia.ops.data.OuiLookup
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mock
 import org.mockito.Mockito.`when`
+import org.mockito.Mockito.mock
 import org.mockito.MockitoAnnotations
 import java.io.ByteArrayInputStream
+import org.mockito.ArgumentMatchers.anyString
 
 class OuiLookupTest {
 
-    @Mock
-    lateinit var context: Context
-
-    @Mock
-    lateinit var assetManager: AssetManager
-
     @Before
-    fun setup() {
+    fun setUp() {
         MockitoAnnotations.openMocks(this)
-        `when`(context.assets).thenReturn(assetManager)
+        // Reset the OuiLookup singleton's cached database between tests
+        val field = OuiLookup::class.java.getDeclaredField("database")
+        field.isAccessible = true
+        field.set(OuiLookup, null)
     }
 
     @Test
     fun `test getVendor returns correct vendor for known MAC`() {
-        val json = """{"000C29": "VMware, Inc.", "0005CD": "Apple, Inc."}"""
-        `when`(assetManager.open(eq("oui_database.json"))).thenReturn(ByteArrayInputStream(json.toByteArray()))
+        val context = mock(android.content.Context::class.java)
+        val assetManager = mock(android.content.res.AssetManager::class.java)
+        val json = """{"000C29": "VMware, Inc.", "0005CD": "Apple, Inc."}""".trimIndent()
+
+        `when`(assetManager.open(anyString())).thenReturn(ByteArrayInputStream(json.toByteArray()))
+        `when`(context.assets).thenReturn(assetManager)
+
+        // Reset database again right before calling getVendor to ensure fresh state
+        val field = OuiLookup::class.java.getDeclaredField("database")
+        field.isAccessible = true
+        field.set(OuiLookup, null)
 
         val vendor = OuiLookup.getVendor(context, "00:0C:29:12:34:56")
         assertEquals("VMware, Inc.", vendor)
     }
 
     @Test
-    fun `test getVendor returns Unknown Vendor for unknown MAC`() {
-        val json = """{"000C29": "VMware, Inc."}"""
-        `when`(assetManager.open(eq("oui_database.json"))).thenReturn(ByteArrayInputStream(json.toByteArray()))
+    fun `test getVendor returns Unknown Vendor for unknown unicast MAC`() {
+        val context = mock(android.content.Context::class.java)
+        val assetManager = mock(android.content.res.AssetManager::class.java)
+        val json = """{"000C29": "VMware, Inc."}""".trimIndent()
 
-        val vendor = OuiLookup.getVendor(context, "AA:BB:CC:DD:EE:FF")
+        `when`(assetManager.open(anyString())).thenReturn(ByteArrayInputStream(json.toByteArray()))
+        `when`(context.assets).thenReturn(assetManager)
+
+        val field = OuiLookup::class.java.getDeclaredField("database")
+        field.isAccessible = true
+        field.set(OuiLookup, null)
+
+        val vendor = OuiLookup.getVendor(context, "00:1A:2B:3C:4D:5E")
         assertEquals("Unknown Vendor", vendor)
+    }
+
+    @Test
+    fun `test getVendor returns Private Address for locally administered MAC`() {
+        val context = mock(android.content.Context::class.java)
+        val assetManager = mock(android.content.res.AssetManager::class.java)
+        val json = """{"000C29": "VMware, Inc."}""".trimIndent()
+
+        `when`(assetManager.open(anyString())).thenReturn(ByteArrayInputStream(json.toByteArray()))
+        `when`(context.assets).thenReturn(assetManager)
+
+        // 0xAA = 10101010, bit 1 (0x02) is set → locally administered
+        val vendor = OuiLookup.getVendor(context, "AA:BB:CC:DD:EE:FF")
+        assertEquals("Private Address (Randomized)", vendor)
+    }
+
+    @Test
+    fun `test getVendor returns Non-Unicast Address for multicast MAC`() {
+        val context = mock(android.content.Context::class.java)
+        val assetManager = mock(android.content.res.AssetManager::class.java)
+        val json = """{"000C29": "VMware, Inc."}""".trimIndent()
+
+        `when`(assetManager.open(anyString())).thenReturn(ByteArrayInputStream(json.toByteArray()))
+        `when`(context.assets).thenReturn(assetManager)
+
+        // 0x01 = 00000001, bit 0 (0x01) is set → multicast, bit 1 (0x02) NOT set
+        val vendor = OuiLookup.getVendor(context, "01:BB:CC:DD:EE:FF")
+        assertEquals("Non-Unicast Address", vendor)
     }
 }

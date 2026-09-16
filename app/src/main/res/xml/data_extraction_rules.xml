@@ -4,11 +4,19 @@
    for details.
 -->
 <data-extraction-rules>
-    <!-- Profiles are deliberate, private on-device investigation baselines. -->
+    <!-- Sensitive device scan data must not be transferred -->
     <cloud-backup>
+        <exclude domain="database" path="sophia-db" />
         <exclude domain="sharedpref" path="sophia_device_profiles.xml" />
+        <exclude domain="sharedpref" path="sophia_investigation_store.xml" />
+        <exclude domain="sharedpref" path="sophia_risk_tuning.xml" />
+        <exclude domain="sharedpref" path="radar_preferences.xml" />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="database" path="sophia-db" />
         <exclude domain="sharedpref" path="sophia_device_profiles.xml" />
+        <exclude domain="sharedpref" path="sophia_investigation_store.xml" />
+        <exclude domain="sharedpref" path="sophia_risk_tuning.xml" />
+        <exclude domain="sharedpref" path="radar_preferences.xml" />
     </device-transfer>
 </data-extraction-rules>

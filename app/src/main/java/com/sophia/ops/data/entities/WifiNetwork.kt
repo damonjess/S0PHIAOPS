@@ -1,9 +1,10 @@
 package com.sophia.ops.data.entities
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "wifi_networks")
+@Entity(tableName = "wifi_networks", indices = [Index(value = ["bssid"], unique = true)])
 data class WifiNetwork(
     @PrimaryKey(autoGenerate = true)
     val id: Int = 0,

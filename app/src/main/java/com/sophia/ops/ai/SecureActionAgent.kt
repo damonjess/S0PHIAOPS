@@ -84,7 +84,6 @@ class SecureActionAgent(
         )
     }
 
-    @Synchronized
     fun analyzeDevice(
         name: String,
         address: String,

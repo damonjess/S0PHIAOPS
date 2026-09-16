@@ -2,6 +2,7 @@ package com.sophia.ops.data.dao
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.sophia.ops.data.entities.WifiNetwork
 import kotlinx.coroutines.flow.Flow
@@ -9,12 +10,12 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface WifiDao {
 
-    @Insert
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(
         network: WifiNetwork
     )
 
-    @Insert
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(networks: List<WifiNetwork>)
 
     @Query(
@@ -22,7 +23,7 @@ interface WifiDao {
     )
     fun getAll(): Flow<List<WifiNetwork>>
 
-    @Query("SELECT * FROM wifi_networks WHERE bssid = :bssid LIMIT 1")
+    @Query("SELECT * FROM wifi_networks WHERE bssid = :bssid ORDER BY timestamp DESC LIMIT 1")
     fun getNetworkByBssidFlow(bssid: String): Flow<WifiNetwork?>
 
     @Query("SELECT COUNT(*) FROM wifi_networks")

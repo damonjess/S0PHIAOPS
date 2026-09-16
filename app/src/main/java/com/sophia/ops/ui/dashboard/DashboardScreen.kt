@@ -42,7 +42,7 @@ fun DashboardScreen(
     onNavigateToHistory: () -> Unit = {}
 ) {
     DisposableEffect(vm) {
-        vm.startAutoRefresh(10000)
+        vm.startAutoRefresh()
         onDispose {
             vm.stopAutoRefresh()
         }
