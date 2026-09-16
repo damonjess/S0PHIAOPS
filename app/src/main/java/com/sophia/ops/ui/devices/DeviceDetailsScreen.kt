@@ -28,6 +28,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.CardDefaults
+import com.sophia.ops.ui.theme.SophiaThemeColors
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -241,9 +242,9 @@ private fun DetailScaffold(title: String, onBack: () -> Unit, content: @Composab
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(title, color = Color(0xFF45F08A)) },
+                title = { Text(title, color = SophiaThemeColors.statusGreen) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color(0xFF45F08A)) }
+                    IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = SophiaThemeColors.statusGreen) }
                 },
             )
         },
@@ -256,21 +257,21 @@ private fun LoadingState(padding: androidx.compose.foundation.layout.PaddingValu
     androidx.compose.foundation.layout.Box(
         modifier = Modifier.fillMaxSize().padding(padding),
         contentAlignment = Alignment.Center,
-    ) { CircularProgressIndicator(color = Color(0xFF45F08A)) }
+    ) { CircularProgressIndicator(color = SophiaThemeColors.statusGreen) }
 }
 
 @Composable
 private fun DeviceHeading(name: String, subtitle: String, favourite: Boolean? = null, onFavourite: (() -> Unit)? = null) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-        Text(name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(6.dp))
-        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Color(0xFFB9FFD9))
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = SophiaThemeColors.statusGreen)
         if (favourite != null && onFavourite != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onFavourite) {
-                    Icon(if (favourite) Icons.Default.Star else Icons.Default.StarBorder, "Favourite", tint = if (favourite) Color(0xFFFFD166) else Color.LightGray)
+                    Icon(if (favourite) Icons.Default.Star else Icons.Default.StarBorder, "Favourite", tint = if (favourite) SophiaThemeColors.statusYellow else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text(if (favourite) "Favourite" else "Not favourite", color = if (favourite) Color(0xFFFFD166) else Color.LightGray)
+                Text(if (favourite) "Favourite" else "Not favourite", color = if (favourite) SophiaThemeColors.statusYellow else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -285,18 +286,18 @@ private fun ReviewStatePanel(
     onIgnore: (() -> Unit)?,
 ) {
     val stateColor = when (disposition) {
-        DeviceDisposition.TRUSTED -> Color(0xFF72F5B2)
-        DeviceDisposition.WATCHLIST -> Color(0xFFFFD166)
-        DeviceDisposition.UNREVIEWED -> Color.LightGray
+        DeviceDisposition.TRUSTED -> SophiaThemeColors.statusGreen
+        DeviceDisposition.WATCHLIST -> SophiaThemeColors.statusYellow
+        DeviceDisposition.UNREVIEWED -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         border = BorderStroke(1.dp, stateColor.copy(alpha = 0.45f)),
     ) {
         Column(Modifier.padding(14.dp)) {
             Text("REVIEW STATE", style = MaterialTheme.typography.labelMedium, color = stateColor, fontWeight = FontWeight.Bold)
-            Text("${disposition.name.lowercase().replaceFirstChar { it.uppercase() }} · ${if (ignored) "Ignored from future Bluetooth updates" else "Locally tracked"}", style = MaterialTheme.typography.bodySmall, color = Color.LightGray, modifier = Modifier.padding(top = 4.dp))
+            Text("${disposition.name.lowercase().replaceFirstChar { it.uppercase() }} · ${if (ignored) "Ignored from future Bluetooth updates" else "Locally tracked"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             Spacer(Modifier.height(10.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Button(onClick = { onDisposition(DeviceDisposition.TRUSTED) }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF176B48))) { Text("TRUST") }
@@ -585,9 +586,9 @@ private fun GattReadValuesPanel(values: List<com.sophia.ops.bluetooth.GattReadVa
 @Composable
 private fun GattProgress(text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color(0xFF72DFFF))
+        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = SophiaThemeColors.statusBlue)
         Spacer(Modifier.width(10.dp))
-        Text(text, style = MaterialTheme.typography.bodySmall, color = Color.White)
+        Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -595,11 +596,11 @@ private fun GattProgress(text: String) {
 private fun GattServiceCard(service: GattServiceInfo) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.22f)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
     ) {
         Column(Modifier.padding(12.dp)) {
-            Text(service.label, style = MaterialTheme.typography.titleSmall, color = Color.White, fontWeight = FontWeight.Bold)
-            Text(if (service.primary) "PRIMARY SERVICE" else "SECONDARY SERVICE", style = MaterialTheme.typography.labelSmall, color = Color(0xFF72DFFF), modifier = Modifier.padding(top = 3.dp))
+            Text(service.label, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
+            Text(if (service.primary) "PRIMARY SERVICE" else "SECONDARY SERVICE", style = MaterialTheme.typography.labelSmall, color = SophiaThemeColors.statusBlue, modifier = Modifier.padding(top = 3.dp))
             UuidIdentifierRow(service.uuid, "Standard assigned service identifier")
             service.characteristics.forEach { characteristic -> GattCharacteristicRow(characteristic) }
         }

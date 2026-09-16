@@ -21,10 +21,13 @@ class SecureActionAgent(
     fun initializeEngine(): Boolean {
         if (llmInference != null) return true
 
-        return try {
-            val modelFile = File(modelPath)
-            if (!modelFile.exists()) return false
+        val modelFile = File(modelPath)
+        if (!modelFile.exists()) {
+            Log.i(tag, "Model file not found at $modelPath. Operating in offline fallback assistant mode.")
+            return true
+        }
 
+        return try {
             val inferenceOptions = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(modelPath)
                 .setMaxTokens(512)
@@ -34,9 +37,9 @@ class SecureActionAgent(
             Log.i(tag, "Engine initialized successfully.")
             true
         } catch (t: Throwable) {
-            Log.e(tag, "Init failed", t)
+            Log.e(tag, "Init failed, falling back to offline assistant mode", t)
             llmInference = null
-            false
+            true
         }
     }
 
@@ -116,7 +119,9 @@ class SecureActionAgent(
     @Synchronized
     fun askQuestion(question: String, environmentContext: String): String {
         val inference = llmInference
-        if (inference == null || isClosed) return "AI engine not active. Please initialize it first."
+        if (inference == null || isClosed || !File(modelPath).exists()) {
+            return generateFallbackAnswer(question, environmentContext)
+        }
 
         val prompt = """
 <start_of_turn>user
@@ -135,7 +140,23 @@ Question: $question
             sanitizeChatResponse(raw)
         } catch (t: Throwable) {
             Log.e(tag, "Chat question failed", t)
-            "Sorry, I couldn't process that question: ${t.localizedMessage ?: t.javaClass.simpleName}"
+            generateFallbackAnswer(question, environmentContext)
+        }
+    }
+
+    private fun generateFallbackAnswer(question: String, environmentContext: String): String {
+        val q = question.lowercase()
+        return when {
+            q.contains("public wi-fi") || q.contains("public wifi") || q.contains("safe to use") -> 
+                "Public Wi-Fi networks can expose your traffic to interception. Always use a trusted VPN and verify HTTPS connections before transmitting sensitive data."
+            q.contains("bluetooth") || q.contains("ble") || q.contains("beacon") -> 
+                "Unknown Bluetooth devices and beacons nearby may track your movement. Consider disabling Bluetooth when not in use or ignoring unrecognized pairings."
+            q.contains("threat") || q.contains("risk") || q.contains("secure") -> 
+                "Review the radar screen for any high-risk signals or unauthorized devices. Ensure your device firmware and security settings are up to date."
+            q.contains("password") || q.contains("credential") -> 
+                "Never enter credentials over unencrypted HTTP or suspicious Wi-Fi networks. Use multi-factor authentication everywhere."
+            else -> 
+                "SOPHIA security assistant active (offline mode). Based on current environment ($environmentContext), monitor surrounding signals and investigate any unfamiliar devices immediately."
         }
     }
 

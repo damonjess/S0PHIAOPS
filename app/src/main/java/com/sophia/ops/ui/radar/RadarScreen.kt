@@ -67,6 +67,7 @@ import com.sophia.ops.data.OuiLookup
 import com.sophia.ops.data.DeviceDisposition
 import com.sophia.ops.ai.AiAssessment
 import com.sophia.ops.ai.AssessmentSeverity
+import com.sophia.ops.ui.theme.SophiaThemeColors
 import com.sophia.ops.viewmodel.DashboardViewModel
 import kotlin.math.PI
 import kotlin.math.cos
@@ -159,7 +160,7 @@ fun RadarScreen(
                 Text(
                     text = "Current Threat: ${vm.threatScore}%",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color.White
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 LinearProgressIndicator(
                     progress = { threatProgress },
@@ -167,11 +168,11 @@ fun RadarScreen(
                         .fillMaxWidth()
                         .height(8.dp),
                     color = when {
-                        vm.threatScore > 50 -> Color.Red
-                        vm.threatScore > 20 -> Color.Yellow
-                        else -> Color.Green
+                        vm.threatScore > 50 -> SophiaThemeColors.statusRed
+                        vm.threatScore > 20 -> SophiaThemeColors.statusYellow
+                        else -> SophiaThemeColors.statusGreen
                     },
-                    trackColor = Color.DarkGray
+                    trackColor = MaterialTheme.colorScheme.outlineVariant
                 )
             }
         }
@@ -182,11 +183,11 @@ fun RadarScreen(
                 .fillMaxWidth(),
             horizontalArrangement = Arrangement.End
         ) {
-            LegendItem("Wi-Fi", Color.Green)
+            LegendItem("Wi-Fi", SophiaThemeColors.statusGreen)
             Spacer(modifier = Modifier.width(8.dp))
-            LegendItem("BT", Color.Blue)
+            LegendItem("BT", SophiaThemeColors.statusBlue)
             Spacer(modifier = Modifier.width(8.dp))
-            LegendItem("Fav", Color.Yellow)
+            LegendItem("Fav", SophiaThemeColors.statusYellow)
         }
 
         val devicesList = vm.allRadarDevices
@@ -776,12 +777,12 @@ fun StatItem(label: String, value: Int, color: Color = Color.White) {
 }
 
 @Composable
-fun StatItem(label: String, value: String, color: Color = Color.White) {
+fun StatItem(label: String, value: String, color: Color = MaterialTheme.colorScheme.onSurface) {
     Column {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = Color.White.copy(alpha = 0.6f)
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
             text = value,
@@ -798,7 +799,7 @@ fun LegendItem(label: String, color: Color) {
             drawCircle(color = color)
         }
         Spacer(modifier = Modifier.width(4.dp))
-        Text(text = label, style = MaterialTheme.typography.labelSmall, color = Color.White)
+        Text(text = label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 

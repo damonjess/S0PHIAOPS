@@ -25,7 +25,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
+import com.sophia.ops.ai.AssessmentSeverity
 import com.sophia.ops.data.entities.ScanSession
+import com.sophia.ops.ui.theme.SophiaThemeColors
 import com.sophia.ops.viewmodel.HistoryViewModel
 import java.text.SimpleDateFormat
 import java.util.*
@@ -107,7 +109,7 @@ fun HistoryScreen(vm: HistoryViewModel) {
                         text = "Investigation Timeline",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF72F5B2),
+                        color = SophiaThemeColors.statusGreen,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                     )
                 }
@@ -164,15 +166,17 @@ fun HistoryScreen(vm: HistoryViewModel) {
 
 @Composable
 fun ThreatTrendGraph(sessions: List<ScanSession>) {
+    val graphColor = SophiaThemeColors.statusRed
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .height(200.dp),
-        shape = RoundedCornerShape(24.dp)
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Threat Trend (Last 10)", style = MaterialTheme.typography.labelMedium)
+            Text("Threat Trend (Last 10)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(modifier = Modifier.height(8.dp))
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val maxThreat = (sessions.maxOfOrNull { it.threatScore } ?: 100).coerceAtLeast(10).toFloat()
@@ -189,13 +193,13 @@ fun ThreatTrendGraph(sessions: List<ScanSession>) {
                         val y2 = height - (nextSession.threatScore / maxThreat * height)
 
                         drawLine(
-                            color = Color.Red,
+                            color = graphColor,
                             start = Offset(x1, y1),
                             end = Offset(x2, y2),
                             strokeWidth = 4f
                         )
                         drawCircle(
-                            color = Color.Red,
+                            color = graphColor,
                             radius = 6f,
                             center = Offset(x1, y1)
                         )
@@ -203,7 +207,7 @@ fun ThreatTrendGraph(sessions: List<ScanSession>) {
                         val x1 = index * step
                         val y1 = height - (session.threatScore / maxThreat * height)
                         drawCircle(
-                            color = Color.Red,
+                            color = graphColor,
                             radius = 6f,
                             center = Offset(x1, y1)
                         )
@@ -223,7 +227,8 @@ fun HistoryItem(session: ScanSession) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(24.dp)
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
     ) {
         Row(
             modifier = Modifier
@@ -235,12 +240,13 @@ fun HistoryItem(session: ScanSession) {
             Column {
                 Text(
                     text = sdf.format(Date(session.timestamp)),
-                    style = MaterialTheme.typography.titleMedium
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     text = dateSdf.format(Date(session.timestamp)),
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color.Gray
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
@@ -249,7 +255,7 @@ fun HistoryItem(session: ScanSession) {
                 Spacer(modifier = Modifier.width(12.dp))
                 StatItem("BT", session.bluetoothCount.toString())
                 Spacer(modifier = Modifier.width(12.dp))
-                StatItem("Threat", session.threatScore.toString(), color = if (session.threatScore > 50) Color.Red else Color.Green)
+                StatItem("Threat", session.threatScore.toString(), color = if (session.threatScore > 50) SophiaThemeColors.statusRed else SophiaThemeColors.statusGreen)
             }
         }
     }
@@ -258,7 +264,7 @@ fun HistoryItem(session: ScanSession) {
 @Composable
 fun StatItem(label: String, value: String, color: Color = MaterialTheme.colorScheme.onSurface) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(text = label, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+        Text(text = label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(text = value, style = MaterialTheme.typography.bodyLarge, color = color)
     }
 }
@@ -266,10 +272,10 @@ fun StatItem(label: String, value: String, color: Color = MaterialTheme.colorSch
 @Composable
 private fun IncidentHistoryItem(incident: com.sophia.ops.data.IncidentRecord, vm: HistoryViewModel) {
     val severityColor = when (incident.severity) {
-        com.sophia.ops.ai.AssessmentSeverity.CRITICAL -> Color(0xFFFF5252)
-        com.sophia.ops.ai.AssessmentSeverity.HIGH -> Color(0xFFFF8A65)
-        com.sophia.ops.ai.AssessmentSeverity.MEDIUM -> Color(0xFFFFD166)
-        com.sophia.ops.ai.AssessmentSeverity.LOW -> Color(0xFF72F5B2)
+        AssessmentSeverity.CRITICAL -> SophiaThemeColors.statusRed
+        AssessmentSeverity.HIGH -> SophiaThemeColors.statusRed
+        AssessmentSeverity.MEDIUM -> SophiaThemeColors.statusYellow
+        AssessmentSeverity.LOW -> SophiaThemeColors.statusGreen
     }
     val date = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(incident.createdAt))
     val context = LocalContext.current
@@ -278,7 +284,7 @@ private fun IncidentHistoryItem(incident: com.sophia.ops.data.IncidentRecord, vm
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         border = BorderStroke(1.dp, severityColor.copy(alpha = 0.45f)),
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -296,14 +302,14 @@ private fun IncidentHistoryItem(incident: com.sophia.ops.data.IncidentRecord, vm
                 Text(
                     text = "$date · ${incident.confidence.lowercase()} confidence",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color.LightGray,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = incident.headline,
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Medium,
             )
             if (incident.changeSummary.isNotBlank()) {
@@ -311,14 +317,14 @@ private fun IncidentHistoryItem(incident: com.sophia.ops.data.IncidentRecord, vm
                 Text(
                     text = "Change: ${incident.changeSummary}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFB9FFD9),
+                    color = SophiaThemeColors.statusGreen,
                 )
             }
             Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = "Next step: ${incident.recommendedAction}",
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.LightGray,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(8.dp))
             when (incident.status) {
@@ -340,7 +346,7 @@ private fun IncidentHistoryItem(incident: com.sophia.ops.data.IncidentRecord, vm
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("ACKNOWLEDGED", style = MaterialTheme.typography.labelSmall, color = Color(0xFFFFD166))
+                    Text("ACKNOWLEDGED", style = MaterialTheme.typography.labelSmall, color = SophiaThemeColors.statusYellow)
                     Button(onClick = { vm.updateIncidentStatus(incident.id, com.sophia.ops.data.IncidentStatus.RESOLVED) }) {
                         Text("RESOLVE")
                     }
@@ -348,7 +354,7 @@ private fun IncidentHistoryItem(incident: com.sophia.ops.data.IncidentRecord, vm
                 com.sophia.ops.data.IncidentStatus.RESOLVED -> Text(
                     text = "RESOLVED LOCALLY",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF72F5B2),
+                    color = SophiaThemeColors.statusGreen,
                     fontWeight = FontWeight.Bold,
                 )
             }

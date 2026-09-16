@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.sophia.ops.ui.theme.SophiaThemeColors
 import com.sophia.ops.viewmodel.DashboardViewModel
 
 @Composable
@@ -72,7 +73,7 @@ fun DashboardScreen(
             style = MaterialTheme.typography.headlineLarge,
             fontWeight = FontWeight.Bold,
             letterSpacing = 4.sp,
-            color = Color.White
+            color = MaterialTheme.colorScheme.onBackground
         )
         
         Spacer(modifier = Modifier.height(24.dp))
@@ -80,7 +81,8 @@ fun DashboardScreen(
         Text(
             text = vm.status,
             style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Medium
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onBackground
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -88,16 +90,16 @@ fun DashboardScreen(
         Text(
             text = "Last Scan",
             style = MaterialTheme.typography.labelMedium,
-            color = Color.Gray
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
             text = vm.lastScanTime,
             style = MaterialTheme.typography.titleMedium,
-            color = Color.White
+            color = MaterialTheme.colorScheme.onBackground
         )
 
         Spacer(modifier = Modifier.height(24.dp))
-        HorizontalDivider(color = Color.DarkGray, thickness = 1.dp)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
         Spacer(modifier = Modifier.height(24.dp))
 
         // Main Stats Grid
@@ -121,9 +123,9 @@ fun DashboardScreen(
                 label = "⚠ Threat",
                 valueString = vm.threatLevel,
                 valueColor = when (vm.threatLevel) {
-                    "HIGH" -> Color.Red
-                    "MEDIUM" -> Color.Yellow
-                    else -> Color.Green
+                    "HIGH" -> SophiaThemeColors.statusRed
+                    "MEDIUM" -> SophiaThemeColors.statusYellow
+                    else -> SophiaThemeColors.statusGreen
                 },
                 modifier = Modifier.weight(1f)
             )
@@ -135,7 +137,7 @@ fun DashboardScreen(
         }
 
         Spacer(modifier = Modifier.height(32.dp))
-        HorizontalDivider(color = Color.DarkGray, thickness = 1.dp)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
         Spacer(modifier = Modifier.height(32.dp))
 
         // Navigation / Action Buttons
@@ -150,7 +152,8 @@ fun DashboardScreen(
                     .height(56.dp)
                     .scale(scanButtonScale),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (vm.isScanning) Color.DarkGray else MaterialTheme.colorScheme.primary
+                    containerColor = if (vm.isScanning) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
+                    contentColor = if (vm.isScanning) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimary
                 )
             ) {
                 Text(
@@ -184,14 +187,14 @@ fun DashboardScreen(
         }
 
         Spacer(modifier = Modifier.height(32.dp))
-        HorizontalDivider(color = Color.DarkGray, thickness = 1.dp)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
         Spacer(modifier = Modifier.height(32.dp))
 
         // Today's Activity Section
         Text(
             text = "Today's Activity",
             style = MaterialTheme.typography.titleMedium,
-            color = Color.Gray,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Start
         )
@@ -226,9 +229,9 @@ fun DashboardScreen(
                 label = "Highest Threat",
                 valueString = highestThreatToday,
                 valueColor = when (highestThreatToday) {
-                    "HIGH" -> Color.Red
-                    "MEDIUM" -> Color.Yellow
-                    else -> Color.Green
+                    "HIGH" -> SophiaThemeColors.statusRed
+                    "MEDIUM" -> SophiaThemeColors.statusYellow
+                    else -> SophiaThemeColors.statusGreen
                 },
                 modifier = Modifier.weight(1f),
                 small = true
@@ -245,7 +248,7 @@ fun DashboardStatItem(
     modifier: Modifier = Modifier,
     value: Int = 0,
     valueString: String? = null,
-    valueColor: Color = Color.White,
+    valueColor: Color = MaterialTheme.colorScheme.onSurface,
     small: Boolean = false
 ) {
     val animatedValue by animateIntAsState(targetValue = value, label = "StatValue")
@@ -257,7 +260,7 @@ fun DashboardStatItem(
         Text(
             text = label,
             style = if (small) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelLarge,
-            color = Color.Gray
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
@@ -279,15 +282,16 @@ fun DashboardNavButton(
         onClick = onClick,
         modifier = modifier.height(56.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = Color.DarkGray.copy(alpha = 0.5f)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
         ),
         shape = MaterialTheme.shapes.medium
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Bold,
-            color = Color.White
+            fontWeight = FontWeight.Bold
         )
     }
 }
+

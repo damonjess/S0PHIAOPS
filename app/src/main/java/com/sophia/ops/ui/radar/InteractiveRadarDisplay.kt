@@ -175,11 +175,12 @@ fun InteractiveRadarDisplay(
             val displayZoom = zoom * vm.radarRangeMultiplier
             val center = Offset(size.width / 2f + mapOffset.x, size.height / 2f + mapOffset.y)
             val radius = size.minDimension * 0.40f * displayZoom
+            val canvasBg = Color(0xFF09110E)
             val grid = Color(0xFF72F5B2).copy(alpha = 0.25f)
             val dimGrid = Color(0xFF72F5B2).copy(alpha = 0.10f)
 
             drawRoundRect(
-                color = Color(0xFF09110E),
+                color = canvasBg,
                 topLeft = Offset(0f, 0f),
                 size = size,
             )

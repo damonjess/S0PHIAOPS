@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.sophia.ops.model.DeviceType
 import com.sophia.ops.model.NetworkDevice
 import com.sophia.ops.data.OuiLookup
+import com.sophia.ops.ui.theme.SophiaThemeColors
 import com.sophia.ops.viewmodel.DevicesViewModel
 
 @Composable
@@ -172,13 +173,13 @@ fun DevicesContent(
                     Text(
                         text = "Sorted by: $sortOption",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.Gray
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     
                     Text(
                         text = "⇅",
                         style = MaterialTheme.typography.headlineSmall,
-                        color = Color.Green
+                        color = SophiaThemeColors.statusGreen
                     )
                 }
                 
@@ -352,7 +353,7 @@ fun DeviceItem(
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         )
     ) {
         Column(
@@ -372,7 +373,7 @@ fun DeviceItem(
                     Text(
                         text = device.name,
                         style = MaterialTheme.typography.titleLarge,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1
                     )
                 }
@@ -380,7 +381,7 @@ fun DeviceItem(
                     Icon(
                         imageVector = Icons.Default.Star,
                         contentDescription = "Favourite",
-                        tint = Color.Yellow,
+                        tint = SophiaThemeColors.statusYellow,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -393,7 +394,7 @@ fun DeviceItem(
                 Text(
                     text = "$typeIcon $typeName",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color.Gray,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.Bold
                 )
                 
@@ -401,9 +402,9 @@ fun DeviceItem(
 
                 val signalPercent = (2 * (device.signal + 100)).coerceIn(0, 100)
                 val signalColor = when {
-                    signalPercent > 70 -> Color.Green
-                    signalPercent > 40 -> Color.Yellow
-                    else -> Color.Red
+                    signalPercent > 70 -> SophiaThemeColors.statusGreen
+                    signalPercent > 40 -> SophiaThemeColors.statusYellow
+                    else -> SophiaThemeColors.statusRed
                 }
                 
                 Text(
@@ -418,7 +419,7 @@ fun DeviceItem(
                 Text(
                     text = "MAC: ${device.address}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.LightGray
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 val context = LocalContext.current
@@ -428,7 +429,7 @@ fun DeviceItem(
 
                 Text(
                     text = "Vendor: $cleanVendorName",
-                    color = Color(0xFF00BCD4),
+                    color = SophiaThemeColors.statusBlue,
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
@@ -436,7 +437,7 @@ fun DeviceItem(
             Text(
                 text = "Last Seen: ${DateUtils.getRelativeTimeSpanString(device.lastSeen)}",
                 style = MaterialTheme.typography.labelSmall,
-                color = Color.Gray
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
