@@ -146,6 +146,7 @@ class DashboardViewModel(
         preloadOuiDatabase()
         startAiRequestObserver()
         checkModelExists()
+        activateOnDeviceAI()
     }
 
     private fun checkModelExists() {
@@ -309,7 +310,7 @@ class DashboardViewModel(
                     tacticalAgent = agent
                     aiInitializationFailed = false
                     aiAdviceText = if (targetPath != null) {
-                        "SOPHIA rule-based assessment active. Local chat AI available."
+                        "SOPHIA Gemma 3 AI model active. Ready for tactical Q&A."
                     } else {
                         "SOPHIA offline security assistant active. Ready for tactical Q&A."
                     }
