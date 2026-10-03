@@ -139,7 +139,7 @@ private fun BluetoothDetails(address: String, vm: DeviceDetailsViewModel, onBack
                 )
                 Spacer(Modifier.height(10.dp))
                 OutlinedButton(onClick = { showRenameDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text("RENAME DEVICE")
+                    Text("Rename device")
                 }
             }
         }
@@ -218,16 +218,16 @@ private fun WifiDetails(address: String, vm: DeviceDetailsViewModel, onBack: () 
                 Spacer(Modifier.height(14.dp))
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19)),
-                    border = BorderStroke(1.dp, Color(0xFF72F5B2).copy(alpha = 0.28f)),
+                    colors = CardDefaults.cardColors(containerColor = SophiaThemeColors.cardContainer),
+                    border = BorderStroke(1.dp, SophiaThemeColors.statusGreen.copy(alpha = 0.28f)),
                 ) {
                     Column(Modifier.padding(14.dp)) {
-                        Text("LOCAL INVESTIGATION NOTE", style = MaterialTheme.typography.labelMedium, color = Color(0xFF72F5B2))
+                        Text("LOCAL INVESTIGATION NOTE", style = MaterialTheme.typography.labelMedium, color = SophiaThemeColors.statusGreen)
                         Spacer(Modifier.height(6.dp))
                         Text(
                             "Use Trust or Watch to influence future local assessments. Wi-Fi details do not initiate a connection, authentication, or traffic capture.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.LightGray,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -300,9 +300,9 @@ private fun ReviewStatePanel(
             Text("${disposition.name.lowercase().replaceFirstChar { it.uppercase() }} · ${if (ignored) "Ignored from future Bluetooth updates" else "Locally tracked"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             Spacer(Modifier.height(10.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Button(onClick = { onDisposition(DeviceDisposition.TRUSTED) }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF176B48))) { Text("TRUST") }
-                Button(onClick = { onDisposition(DeviceDisposition.WATCHLIST) }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF825D18))) { Text("WATCH") }
-                TextButton(onClick = { onDisposition(DeviceDisposition.UNREVIEWED) }, modifier = Modifier.weight(0.7f)) { Text("CLEAR") }
+                Button(onClick = { onDisposition(DeviceDisposition.TRUSTED) }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = SophiaThemeColors.statusGreen.copy(alpha = 0.18f), contentColor = SophiaThemeColors.statusGreen)) { Text("Trust") }
+                Button(onClick = { onDisposition(DeviceDisposition.WATCHLIST) }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = SophiaThemeColors.statusYellow.copy(alpha = 0.18f), contentColor = SophiaThemeColors.statusYellow)) { Text("Watch") }
+                TextButton(onClick = { onDisposition(DeviceDisposition.UNREVIEWED) }, modifier = Modifier.weight(0.7f)) { Text("Clear") }
             }
             onIgnore?.let {
                 OutlinedButton(onClick = it, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
@@ -320,11 +320,11 @@ private fun BluetoothSignalPanel(device: BluetoothDeviceEntity) {
     val trend = signalTrend(values)
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19)),
+        colors = CardDefaults.cardColors(containerColor = SophiaThemeColors.cardContainer),
         border = BorderStroke(1.dp, getSignalColor(device.rssi).copy(alpha = 0.45f)),
     ) {
         Column(Modifier.padding(14.dp)) {
-            Text("SIGNAL ANALYSIS", style = MaterialTheme.typography.labelMedium, color = Color(0xFF72F5B2), fontWeight = FontWeight.Bold)
+            Text("SIGNAL ANALYSIS", style = MaterialTheme.typography.labelMedium, color = SophiaThemeColors.statusGreen, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(10.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Metric("Current", "${device.rssi} dBm")
@@ -332,7 +332,7 @@ private fun BluetoothSignalPanel(device: BluetoothDeviceEntity) {
                 Metric("Risk", "${device.riskScore}/100")
             }
             Spacer(Modifier.height(10.dp))
-            Text("Trend: $trend${average?.let { " · Recent average $it dBm" }.orEmpty()}", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+            Text("Trend: $trend${average?.let { " · Recent average $it dBm" }.orEmpty()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (values.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 Row(modifier = Modifier.fillMaxWidth().height(42.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -340,7 +340,7 @@ private fun BluetoothSignalPanel(device: BluetoothDeviceEntity) {
                         androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f).fillMaxSize().background(getSignalColor(point).copy(alpha = 0.72f)))
                     }
                 }
-                Text("Recent sampled signal history", style = MaterialTheme.typography.labelSmall, color = Color.Gray, modifier = Modifier.padding(top = 6.dp))
+                Text("Recent sampled signal history", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
             }
         }
     }
@@ -353,9 +353,9 @@ private fun WifiPosturePanel(network: WifiNetwork) {
         network.security.contains("WEP", true) -> "Legacy WEP capability reported"
         else -> "No WPA or WEP capability marker reported"
     }
-    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19))) {
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = SophiaThemeColors.cardContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("WI-FI POSTURE", style = MaterialTheme.typography.labelMedium, color = Color(0xFF72F5B2), fontWeight = FontWeight.Bold)
+            Text("WI-FI POSTURE", style = MaterialTheme.typography.labelMedium, color = SophiaThemeColors.statusGreen, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(10.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Metric("Signal", "${network.signal} dBm")
@@ -363,7 +363,7 @@ private fun WifiPosturePanel(network: WifiNetwork) {
                 Metric("Risk", "${network.riskScore}/100")
             }
             Spacer(Modifier.height(10.dp))
-            Text(security, style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+            Text(security, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -371,19 +371,19 @@ private fun WifiPosturePanel(network: WifiNetwork) {
 @Composable
 private fun Metric(label: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.bodyMedium, color = Color.White, fontWeight = FontWeight.Medium)
     }
 }
 
 @Composable
 private fun MetadataPanel(entries: List<Pair<String, String>>) {
-    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19))) {
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = SophiaThemeColors.cardContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("DEVICE METADATA", style = MaterialTheme.typography.labelMedium, color = Color(0xFF72F5B2), fontWeight = FontWeight.Bold)
+            Text("DEVICE METADATA", style = MaterialTheme.typography.labelMedium, color = SophiaThemeColors.statusGreen, fontWeight = FontWeight.Bold)
             entries.forEach { (label, value) ->
                 HorizontalDivider(modifier = Modifier.padding(top = 10.dp), color = Color.DarkGray)
-                Text(label, style = MaterialTheme.typography.labelSmall, color = Color.Gray, modifier = Modifier.padding(top = 8.dp))
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
                 Text(value, style = MaterialTheme.typography.bodyMedium, color = Color.White)
             }
         }
@@ -399,20 +399,20 @@ private fun ProfileComparisonPanel(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF12191B)),
-        border = BorderStroke(1.dp, Color(0xFF72DFFF).copy(alpha = 0.42f)),
+        colors = CardDefaults.cardColors(containerColor = SophiaThemeColors.cardContainer),
+        border = BorderStroke(1.dp, SophiaThemeColors.statusBlue.copy(alpha = 0.42f)),
     ) {
         Column(Modifier.padding(14.dp)) {
-            Text("LOCAL DEVICE PROFILE", style = MaterialTheme.typography.labelMedium, color = Color(0xFF72DFFF), fontWeight = FontWeight.Bold)
+            Text("LOCAL DEVICE PROFILE", style = MaterialTheme.typography.labelMedium, color = SophiaThemeColors.statusBlue, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             if (profile == null) {
-                Text(emptyMessage, style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+                Text(emptyMessage, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 onSaveProfile?.let { save ->
                     Button(
                         onClick = save,
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF176B48)),
-                    ) { Text("SAVE LOCAL PROFILE") }
+                        colors = ButtonDefaults.buttonColors(containerColor = SophiaThemeColors.statusGreen.copy(alpha = 0.18f), contentColor = SophiaThemeColors.statusGreen),
+                    ) { Text("Save local profile") }
                 }
                 return@Column
             }
@@ -420,13 +420,13 @@ private fun ProfileComparisonPanel(
             Text(
                 "Baseline saved ${formatTimestamp(profile.savedAt)} · private to this phone",
                 style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFFB9FFD9),
+                color = SophiaThemeColors.statusGreen,
             )
             profile.localLabel?.takeIf { it.isNotBlank() }?.let {
-                Text("Local label: $it", style = MaterialTheme.typography.labelSmall, color = Color.LightGray, modifier = Modifier.padding(top = 4.dp))
+                Text("Local label: $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             }
             profile.notes?.takeIf { it.isNotBlank() }?.let {
-                Text("Notes retained in baseline", style = MaterialTheme.typography.labelSmall, color = Color.Gray, modifier = Modifier.padding(top = 2.dp))
+                Text("Notes retained in baseline", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
             }
             if (profile.signalPattern.isNotEmpty()) {
                 val signalSummary = if (profile.signalPattern.size == 1) {
@@ -434,7 +434,7 @@ private fun ProfileComparisonPanel(
                 } else {
                     "Baseline signal pattern: ${profile.signalPattern.size} samples · average ${profile.signalPattern.average().roundToInt()} dBm · range ${profile.signalPattern.min()} to ${profile.signalPattern.max()} dBm"
                 }
-                Text(signalSummary, style = MaterialTheme.typography.labelSmall, color = Color.LightGray, modifier = Modifier.padding(top = 4.dp))
+                Text(signalSummary, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             }
             if (comparison == null) return@Column
 
@@ -445,54 +445,54 @@ private fun ProfileComparisonPanel(
 
             var showedChange = false
             comparison.nameChanged?.let { (before, after) ->
-                ComparisonLine("Name changed", "$before → $after", Color(0xFFFFD166))
+                ComparisonLine("Name changed", "$before → $after", SophiaThemeColors.statusYellow)
                 showedChange = true
             }
             comparison.securityChanged?.let { (before, after) ->
-                ComparisonLine("Security capability changed", "$before → $after", Color(0xFFFF8A65))
+                ComparisonLine("Security capability changed", "$before → $after", SophiaThemeColors.statusOrange)
                 showedChange = true
             }
             comparison.addedServices.forEach { service ->
-                ComparisonLine("New GATT service", service.label, Color(0xFF72F5B2))
+                ComparisonLine("New GATT service", service.label, SophiaThemeColors.statusGreen)
                 showedChange = true
             }
             comparison.removedServices.forEach { service ->
-                ComparisonLine("GATT service not found", service.label, Color(0xFFFF8A65))
+                ComparisonLine("GATT service not found", service.label, SophiaThemeColors.statusOrange)
                 showedChange = true
             }
             comparison.changedValues.forEach { value ->
-                ComparisonLine("Safe value changed · ${value.label}", "${value.previous} → ${value.current}", Color(0xFFFFD166))
+                ComparisonLine("Safe value changed · ${value.label}", "${value.previous} → ${value.current}", SophiaThemeColors.statusYellow)
                 showedChange = true
             }
             comparison.dispositionChanged?.let { (before, after) ->
                 ComparisonLine(
                     "Review state changed",
                     "${before.name.lowercase().replaceFirstChar { it.uppercase() }} → ${after.name.lowercase().replaceFirstChar { it.uppercase() }}",
-                    Color(0xFF72DFFF),
+                    SophiaThemeColors.statusBlue,
                 )
                 showedChange = true
             }
             if (comparison.signalDelta != 0) {
                 val signalText = if (comparison.signalDelta > 0) "${comparison.signalDelta} dBm stronger" else "${-comparison.signalDelta} dBm weaker"
-                ComparisonLine("Signal movement", signalText, if (comparison.signalDelta > 0) Color(0xFF72DFFF) else Color(0xFFFFD166))
+                ComparisonLine("Signal movement", signalText, if (comparison.signalDelta > 0) SophiaThemeColors.statusBlue else SophiaThemeColors.statusYellow)
                 showedChange = true
             }
             if (comparison.riskDelta != 0) {
                 val riskText = if (comparison.riskDelta > 0) "+${comparison.riskDelta} points" else "${comparison.riskDelta} points"
-                ComparisonLine("Risk posture", riskText, if (comparison.riskDelta > 0) Color(0xFFFF8A65) else Color(0xFF72F5B2))
+                ComparisonLine("Risk posture", riskText, if (comparison.riskDelta > 0) SophiaThemeColors.statusOrange else SophiaThemeColors.statusGreen)
                 showedChange = true
             }
             if (!showedChange) {
-                Text("No differences in the currently observed fields.", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB9FFD9), modifier = Modifier.padding(top = 4.dp))
+                Text("No differences in the currently observed fields.", style = MaterialTheme.typography.bodySmall, color = SophiaThemeColors.statusGreen, modifier = Modifier.padding(top = 4.dp))
             }
             if (profile.deviceType.name == "BLUETOOTH" && !comparison.gattCompared) {
-                ComparisonLine("GATT topology", "Not compared yet — complete a new read-only discovery to check services.", Color.Gray)
+                ComparisonLine("GATT topology", "Not compared yet — complete a new read-only discovery to check services.", MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (profile.standardValues.isNotEmpty() && !comparison.valuesCompared) {
-                ComparisonLine("Safe standard values", "Not compared yet — use the optional read-only value inspection.", Color.Gray)
+                ComparisonLine("Safe standard values", "Not compared yet — use the optional read-only value inspection.", MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (abs(comparison.signalDelta) < 5) {
-                Text("Signal is broadly stable within a 5 dBm tolerance.", style = MaterialTheme.typography.labelSmall, color = Color.Gray, modifier = Modifier.padding(top = 8.dp))
+                Text("Signal is broadly stable within a 5 dBm tolerance.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
             }
         }
     }
@@ -502,7 +502,7 @@ private fun ProfileComparisonPanel(
 private fun ComparisonLine(label: String, detail: String, tint: Color) {
     Column(modifier = Modifier.padding(top = 8.dp)) {
         Text(label, style = MaterialTheme.typography.labelSmall, color = tint, fontWeight = FontWeight.Medium)
-        Text(detail, style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+        Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -516,27 +516,27 @@ private fun GattExplorerPanel(
     val state = vm.gattState
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF101B1B)),
-        border = BorderStroke(1.dp, Color(0xFF00BCD4).copy(alpha = 0.55f)),
+        colors = CardDefaults.cardColors(containerColor = SophiaThemeColors.cardContainer),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)),
     ) {
         Column(Modifier.padding(14.dp)) {
-            Text("READ-ONLY BLE GATT EXPLORER", style = MaterialTheme.typography.labelMedium, color = Color(0xFF72DFFF), fontWeight = FontWeight.Bold)
+            Text("READ-ONLY BLE GATT EXPLORER", style = MaterialTheme.typography.labelMedium, color = SophiaThemeColors.statusBlue, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
-            Text("Uses up to three controlled connection attempts. Service discovery is read-only; optional inspection reads only a small list of standard attributes that the device marks as readable. It never writes, subscribes, pairs, or alters the device.", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+            Text("Uses up to three controlled connection attempts. Service discovery is read-only; optional inspection reads only a small list of standard attributes that the device marks as readable. It never writes, subscribes, pairs, or alters the device.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(10.dp))
             when (state) {
-                GattExplorationState.Idle -> Button(onClick = { vm.startGattDiscovery(address) }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00838F))) { Text("DISCOVER GATT SERVICES") }
+                GattExplorationState.Idle -> Button(onClick = { vm.startGattDiscovery(address) }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) { Text("Discover GATT services") }
                 is GattExplorationState.Connecting -> GattProgress("Connecting — attempt ${state.attempt} of ${state.maximumAttempts}…")
                 is GattExplorationState.Retrying -> GattProgress("Retrying: ${state.reason}")
                 is GattExplorationState.Discovering -> GattProgress("Discovering service topology — attempt ${state.attempt}…")
                 is GattExplorationState.ReadingValues -> GattProgress("Reading approved standard values: ${state.completed} of ${state.total}…")
                 is GattExplorationState.Error -> {
-                    Text(state.message, style = MaterialTheme.typography.bodySmall, color = Color(0xFFFF8A65))
-                    state.diagnostics?.let { Text("Diagnostics: ${it.message}", style = MaterialTheme.typography.labelSmall, color = Color.Gray, modifier = Modifier.padding(top = 6.dp)) }
-                    OutlinedButton(onClick = { vm.retryGattDiscovery() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("TRY AGAIN") }
+                    Text(state.message, style = MaterialTheme.typography.bodySmall, color = SophiaThemeColors.statusOrange)
+                    state.diagnostics?.let { Text("Diagnostics: ${it.message}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp)) }
+                    OutlinedButton(onClick = { vm.retryGattDiscovery() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Try again") }
                 }
                 is GattExplorationState.Complete -> {
-                    Text("${state.services.size} service(s) discovered · ${state.diagnostics.message}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF72F5B2))
+                    Text("${state.services.size} service(s) discovered · ${state.diagnostics.message}", style = MaterialTheme.typography.bodySmall, color = SophiaThemeColors.statusGreen)
                     OutlinedButton(onClick = { vm.inspectGattStandardValues() }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
                         Text(if (state.values.isEmpty()) "READ SAFE STANDARD VALUES" else "RE-READ SAFE STANDARD VALUES")
                     }
@@ -547,18 +547,18 @@ private fun GattExplorerPanel(
                     Button(
                         onClick = onSaveProfile,
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF176B48)),
+                        colors = ButtonDefaults.buttonColors(containerColor = SophiaThemeColors.statusGreen.copy(alpha = 0.18f), contentColor = SophiaThemeColors.statusGreen),
                     ) {
                         Text(if (hasSavedProfile) "UPDATE LOCAL PROFILE" else "SAVE TO LOCAL PROFILE")
                     }
                     Text(
                         "Saves this read-only discovery result only on this phone. It does not send data or alter the device.",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.Gray,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp),
                     )
                     state.services.forEach { service -> GattServiceCard(service) }
-                    OutlinedButton(onClick = { vm.clearGattResult() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("CLOSE GATT RESULTS") }
+                    OutlinedButton(onClick = { vm.clearGattResult() }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Close GATT results") }
                 }
             }
         }
@@ -569,15 +569,15 @@ private fun GattExplorerPanel(
 private fun GattReadValuesPanel(values: List<com.sophia.ops.bluetooth.GattReadValue>) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF071616)),
-        border = BorderStroke(1.dp, Color(0xFF72F5B2).copy(alpha = 0.35f)),
+        colors = CardDefaults.cardColors(containerColor = SophiaThemeColors.cardContainer),
+        border = BorderStroke(1.dp, SophiaThemeColors.statusGreen.copy(alpha = 0.35f)),
     ) {
         Column(Modifier.padding(10.dp)) {
-            Text("READ-ONLY STANDARD VALUES", style = MaterialTheme.typography.labelMedium, color = Color(0xFF72F5B2), fontWeight = FontWeight.Bold)
+            Text("READ-ONLY STANDARD VALUES", style = MaterialTheme.typography.labelMedium, color = SophiaThemeColors.statusGreen, fontWeight = FontWeight.Bold)
             values.forEach { result ->
                 HorizontalDivider(modifier = Modifier.padding(top = 8.dp), color = Color.DarkGray)
                 Text(result.label, style = MaterialTheme.typography.bodySmall, color = Color.White, modifier = Modifier.padding(top = 7.dp))
-                Text(result.value, style = MaterialTheme.typography.bodySmall, color = if (result.available) Color(0xFFB9FFD9) else Color(0xFFFFB199))
+                Text(result.value, style = MaterialTheme.typography.bodySmall, color = if (result.available) SophiaThemeColors.statusGreen else SophiaThemeColors.statusOrange)
             }
         }
     }
@@ -610,12 +610,12 @@ private fun GattServiceCard(service: GattServiceInfo) {
 @Composable
 private fun GattCharacteristicRow(characteristic: GattCharacteristicInfo) {
     Column(modifier = Modifier.padding(top = 12.dp, start = 4.dp)) {
-        Text(characteristic.label, style = MaterialTheme.typography.bodyMedium, color = Color(0xFFB9FFD9), fontWeight = FontWeight.Medium)
+        Text(characteristic.label, style = MaterialTheme.typography.bodyMedium, color = SophiaThemeColors.statusGreen, fontWeight = FontWeight.Medium)
         UuidIdentifierRow(characteristic.uuid, "Standard assigned characteristic identifier")
-        Text("Properties: ${characteristic.properties.joinToString(" · ")}", style = MaterialTheme.typography.labelSmall, color = Color.LightGray, modifier = Modifier.padding(top = 3.dp))
+        Text("Properties: ${characteristic.properties.joinToString(" · ")}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 3.dp))
         characteristic.descriptors.forEach { descriptor ->
             Column(modifier = Modifier.padding(start = 10.dp, top = 8.dp)) {
-                Text(descriptor.label, style = MaterialTheme.typography.labelSmall, color = Color.LightGray)
+                Text(descriptor.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 UuidIdentifierRow(descriptor.uuid, "Standard assigned descriptor identifier", compact = true)
             }
         }
@@ -632,7 +632,7 @@ private fun UuidIdentifierRow(uuid: String, label: String, compact: Boolean = fa
             Text(
                 text = if (uuid.isStandardUuid()) "Standard Bluetooth assigned identifier" else "Unknown or proprietary identifier",
                 style = MaterialTheme.typography.labelSmall,
-                color = if (uuid.isStandardUuid()) Color(0xFF72DFFF) else Color(0xFFFFD166),
+                color = if (uuid.isStandardUuid()) SophiaThemeColors.statusBlue else SophiaThemeColors.statusYellow,
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = { expanded = !expanded }) {
@@ -642,13 +642,13 @@ private fun UuidIdentifierRow(uuid: String, label: String, compact: Boolean = fa
         if (expanded) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(short, style = MaterialTheme.typography.labelSmall, color = Color(0xFF72DFFF), fontWeight = FontWeight.Medium)
-                    Text(uuid, style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp), color = Color.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(short, style = MaterialTheme.typography.labelSmall, color = SophiaThemeColors.statusBlue, fontWeight = FontWeight.Medium)
+                    Text(uuid, style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 TextButton(onClick = {
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     clipboard.setPrimaryClip(ClipData.newPlainText(label, uuid))
-                }) { Text("COPY", style = MaterialTheme.typography.labelSmall) }
+                }) { Text("Copy", style = MaterialTheme.typography.labelSmall) }
             }
         }
     }
@@ -663,10 +663,10 @@ private fun shortUuid(uuid: String): String {
 
 @Composable
 private fun NotesPanel(notes: String?, onEdit: () -> Unit) {
-    Card(onClick = onEdit, modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19))) {
+    Card(onClick = onEdit, modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = SophiaThemeColors.cardContainer)) {
         Column(Modifier.padding(14.dp)) {
-            Text("INVESTIGATION NOTES", style = MaterialTheme.typography.labelMedium, color = Color(0xFF72F5B2), fontWeight = FontWeight.Bold)
-            Text(notes ?: "Tap to add local notes for this device.", style = MaterialTheme.typography.bodySmall, color = if (notes.isNullOrBlank()) Color.Gray else Color.White, modifier = Modifier.padding(top = 6.dp))
+            Text("INVESTIGATION NOTES", style = MaterialTheme.typography.labelMedium, color = SophiaThemeColors.statusGreen, fontWeight = FontWeight.Bold)
+            Text(notes ?: "Tap to add local notes for this device.", style = MaterialTheme.typography.bodySmall, color = if (notes.isNullOrBlank()) MaterialTheme.colorScheme.onSurfaceVariant else Color.White, modifier = Modifier.padding(top = 6.dp))
         }
     }
 }
@@ -693,8 +693,8 @@ private fun TextEntryDialog(
                 maxLines = if (multiline) 8 else 1,
             )
         },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("SAVE") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("CANCEL") } },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
@@ -726,8 +726,9 @@ private fun formatTimestamp(timestamp: Long): String = DateUtils.getRelativeDate
     null, timestamp, DateUtils.MINUTE_IN_MILLIS, DateUtils.WEEK_IN_MILLIS, 0,
 ).toString()
 
+@Composable
 private fun getSignalColor(rssi: Int): Color = when {
-    rssi >= -55 -> Color(0xFF2BE574)
-    rssi >= -75 -> Color(0xFFFFD166)
-    else -> Color(0xFFFF6B6B)
+    rssi >= -55 -> SophiaThemeColors.statusGreen
+    rssi >= -75 -> SophiaThemeColors.statusYellow
+    else -> SophiaThemeColors.statusRed
 }

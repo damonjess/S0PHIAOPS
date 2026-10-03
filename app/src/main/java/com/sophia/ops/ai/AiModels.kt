@@ -54,3 +54,14 @@ data class AiAnalysisResult(
     val recommendedAction: String get() = assessment.recommendedAction
     val confidence: String get() = assessment.confidence.name.lowercase()
 }
+
+/** One turn of the on-device chat conversation. */
+data class ChatTurn(
+    val role: String,
+    val text: String,
+) {
+    companion object {
+        const val ROLE_USER = "user"
+        const val ROLE_ASSISTANT = "model"
+    }
+}

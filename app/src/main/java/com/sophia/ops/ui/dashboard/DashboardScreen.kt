@@ -1,46 +1,53 @@
 package com.sophia.ops.ui.dashboard
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Radar
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Divider
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.sophia.ops.ui.components.InfoCard
+import com.sophia.ops.ui.components.ScreenHeader
+import com.sophia.ops.ui.components.SectionLabel
 import com.sophia.ops.ui.theme.SophiaThemeColors
+import com.sophia.ops.ui.components.SophiaUi
+import com.sophia.ops.ui.components.StatusChip
+import com.sophia.ops.ui.components.StatTile
+import com.sophia.ops.ui.components.threatColorFor
 import com.sophia.ops.viewmodel.DashboardViewModel
 
 @Composable
 fun DashboardScreen(
     vm: DashboardViewModel,
-    onNavigateToRadar: () -> Unit = {},
-    onNavigateToDevices: () -> Unit = {},
-    onNavigateToHistory: () -> Unit = {}
+    onNavigateToAtlas: () -> Unit = {},
 ) {
     DisposableEffect(vm) {
         vm.startAutoRefresh()
@@ -55,243 +62,198 @@ fun DashboardScreen(
     val bluetoothFoundToday by vm.bluetoothFoundToday.collectAsState()
     val highestThreatToday by vm.highestThreatToday.collectAsState()
 
-    val scanButtonScale by animateFloatAsState(
-        targetValue = if (vm.isScanning) 1.05f else 1f,
-        label = "ScanButtonScale"
-    )
-
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp)
             .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Header Section
-        Text(
-            text = "SOPHIA OPS",
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 4.sp,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-        
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text(
-            text = vm.status,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onBackground
+        ScreenHeader(
+            title = "S0PHIA OPS",
+            subtitle = "Local network awareness",
+            actions = {
+                StatusChip(
+                    text = if (vm.isScanning) "SCANNING" else "IDLE",
+                    color = if (vm.isScanning) SophiaThemeColors.statusGreen
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
         )
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        Text(
-            text = "Last Scan",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = vm.lastScanTime,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Main Stats Grid
-        Row(modifier = Modifier.fillMaxWidth()) {
-            DashboardStatItem(
-                label = "📶 Wi-Fi",
-                value = vm.networks.size,
-                modifier = Modifier.weight(1f)
+        // Scan control
+        InfoCard(modifier = Modifier.padding(horizontal = SophiaUi.ScreenPadding)) {
+            Text(
+                text = if (vm.isScanning) "Scan in progress" else "Ready to scan",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
             )
-            DashboardStatItem(
-                label = "🔵 Bluetooth",
-                value = vm.bluetoothDevices.size,
-                modifier = Modifier.weight(1f)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = vm.status,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
-        
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Row(modifier = Modifier.fillMaxWidth()) {
-            DashboardStatItem(
-                label = "⚠ Threat",
-                valueString = vm.threatLevel,
-                valueColor = when (vm.threatLevel) {
-                    "HIGH" -> SophiaThemeColors.statusRed
-                    "MEDIUM" -> SophiaThemeColors.statusYellow
-                    else -> SophiaThemeColors.statusGreen
-                },
-                modifier = Modifier.weight(1f)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Last scan · ${vm.lastScanTime}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            DashboardStatItem(
-                label = "📜 History",
-                value = historyCount,
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(32.dp))
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // Navigation / Action Buttons
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+            if (vm.isScanning) {
+                Spacer(modifier = Modifier.height(12.dp))
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.outlineVariant,
+                )
+            }
+            Spacer(modifier = Modifier.height(14.dp))
             Button(
                 onClick = { vm.scan() },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp)
-                    .scale(scanButtonScale),
+                    .height(48.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (vm.isScanning) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
-                    contentColor = if (vm.isScanning) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onPrimary
-                )
+                    containerColor = if (vm.isScanning) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.primary,
+                ),
             ) {
                 Text(
-                    text = if (vm.isScanning) "SCANNING..." else "SCAN",
+                    text = if (vm.isScanning) "Scanning…" else "Scan now",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                DashboardNavButton(
-                    text = "RADAR",
-                    onClick = onNavigateToRadar,
-                    modifier = Modifier.weight(1f)
-                )
-                DashboardNavButton(
-                    text = "DEVICES",
-                    onClick = onNavigateToDevices,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            
-            DashboardNavButton(
-                text = "HISTORY",
-                onClick = onNavigateToHistory,
-                modifier = Modifier.fillMaxWidth()
-            )
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(SophiaUi.SectionGap))
 
-        // Today's Activity Section
-        Text(
-            text = "Today's Activity",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Start
+        // Live overview
+        SectionLabel(
+            text = "Live overview",
+            modifier = Modifier
+                .padding(start = SophiaUi.ScreenPadding)
+                .padding(bottom = 8.dp),
         )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Row(modifier = Modifier.fillMaxWidth()) {
-            DashboardStatItem(
-                label = "Scans Today",
-                value = scansToday,
+        OverviewRow {
+            StatTile(
+                label = "Wi-Fi",
+                value = vm.networks.size.toString(),
+                icon = Icons.Default.Wifi,
+                tint = SophiaThemeColors.statusBlue,
                 modifier = Modifier.weight(1f),
-                small = true
             )
-            DashboardStatItem(
-                label = "Wi-Fi Seen",
-                value = wifiFoundToday,
+            Spacer(modifier = Modifier.width(SophiaUi.ItemGap))
+            StatTile(
+                label = "Bluetooth",
+                value = vm.bluetoothDevices.size.toString(),
+                icon = Icons.Default.Bluetooth,
+                tint = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.weight(1f),
-                small = true
+            )
+        }
+        Spacer(modifier = Modifier.height(SophiaUi.ItemGap))
+        OverviewRow {
+            StatTile(
+                label = "Threat",
+                value = vm.threatLevel,
+                icon = Icons.Default.Shield,
+                tint = threatColorFor(vm.threatLevel),
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(modifier = Modifier.width(SophiaUi.ItemGap))
+            StatTile(
+                label = "History",
+                value = historyCount.toString(),
+                icon = Icons.Default.History,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f),
             )
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(SophiaUi.ItemGap))
 
-        Row(modifier = Modifier.fillMaxWidth()) {
-            DashboardStatItem(
-                label = "Bluetooth Seen",
-                value = bluetoothFoundToday,
-                modifier = Modifier.weight(1f),
-                small = true
+        OutlinedButton(
+            onClick = onNavigateToAtlas,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .padding(horizontal = SophiaUi.ScreenPadding),
+        ) {
+            Icon(
+                imageVector = Icons.Default.Radar,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
             )
-            DashboardStatItem(
-                label = "Highest Threat",
-                valueString = highestThreatToday,
-                valueColor = when (highestThreatToday) {
-                    "HIGH" -> SophiaThemeColors.statusRed
-                    "MEDIUM" -> SophiaThemeColors.statusYellow
-                    else -> SophiaThemeColors.statusGreen
-                },
-                modifier = Modifier.weight(1f),
-                small = true
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Open Signal Atlas",
+                style = MaterialTheme.typography.titleMedium,
             )
         }
-        
-        Spacer(modifier = Modifier.height(40.dp))
+
+        Spacer(modifier = Modifier.height(SophiaUi.SectionGap))
+
+        // Today's activity
+        SectionLabel(
+            text = "Today",
+            modifier = Modifier
+                .padding(start = SophiaUi.ScreenPadding)
+                .padding(bottom = 8.dp),
+        )
+        OverviewRow {
+            StatTile(
+                label = "Scans",
+                value = scansToday.toString(),
+                icon = Icons.Default.Radar,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f),
+                compact = true,
+            )
+            Spacer(modifier = Modifier.width(SophiaUi.ItemGap))
+            StatTile(
+                label = "Wi-Fi seen",
+                value = wifiFoundToday.toString(),
+                icon = Icons.Default.Wifi,
+                tint = SophiaThemeColors.statusBlue,
+                modifier = Modifier.weight(1f),
+                compact = true,
+            )
+        }
+        Spacer(modifier = Modifier.height(SophiaUi.ItemGap))
+        OverviewRow {
+            StatTile(
+                label = "Bluetooth seen",
+                value = bluetoothFoundToday.toString(),
+                icon = Icons.Default.Bluetooth,
+                tint = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.weight(1f),
+                compact = true,
+            )
+            Spacer(modifier = Modifier.width(SophiaUi.ItemGap))
+            StatTile(
+                label = "Highest threat",
+                value = highestThreatToday,
+                icon = Icons.Default.Shield,
+                tint = threatColorFor(highestThreatToday),
+                modifier = Modifier.weight(1f),
+                compact = true,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(SophiaUi.SectionGap))
     }
 }
 
 @Composable
-fun DashboardStatItem(
-    label: String,
-    modifier: Modifier = Modifier,
-    value: Int = 0,
-    valueString: String? = null,
-    valueColor: Color = MaterialTheme.colorScheme.onSurface,
-    small: Boolean = false
-) {
-    val animatedValue by animateIntAsState(targetValue = value, label = "StatValue")
-    
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = label,
-            style = if (small) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = valueString ?: animatedValue.toString(),
-            style = if (small) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = valueColor
-        )
-    }
+private fun OverviewRow(content: @Composable RowScope.() -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = SophiaUi.ScreenPadding),
+        horizontalArrangement = Arrangement.spacedBy(SophiaUi.ItemGap),
+        content = content,
+    )
 }
-
-@Composable
-fun DashboardNavButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.height(56.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-        ),
-        shape = MaterialTheme.shapes.medium
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Bold
-        )
-    }
-}
-

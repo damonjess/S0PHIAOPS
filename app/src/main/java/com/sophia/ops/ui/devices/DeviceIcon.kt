@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -59,6 +60,6 @@ fun DeviceIcon(
         imageVector = icon,
         contentDescription = null,
         modifier = modifier.size(32.dp),
-        tint = Color(0xFF00FF66)
+        tint = MaterialTheme.colorScheme.primary
     )
 }

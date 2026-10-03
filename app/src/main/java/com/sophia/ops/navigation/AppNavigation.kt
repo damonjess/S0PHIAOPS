@@ -2,12 +2,11 @@ package com.sophia.ops.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Radar
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,6 +23,7 @@ import com.sophia.ops.ui.dashboard.DashboardScreen
 import com.sophia.ops.ui.devices.DeviceDetailsScreen
 import com.sophia.ops.ui.devices.DevicesScreen
 import com.sophia.ops.ui.history.HistoryScreen
+import com.sophia.ops.ui.more.MoreScreen
 import com.sophia.ops.ui.radar.RadarScreen
 import com.sophia.ops.ui.settings.SettingsScreen
 import com.sophia.ops.ui.statistics.StatisticsScreen
@@ -39,17 +39,17 @@ object Routes {
     const val DEVICES = "devices"
     const val DEVICE_DETAILS = "device_details/{type}/{address}"
     const val HISTORY = "history"
+    const val MORE = "more"
     const val STATISTICS = "statistics"
     const val SETTINGS = "settings"
 }
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
-    object Dashboard : Screen(Routes.DASHBOARD, "Dashboard", Icons.Default.Dashboard)
-    object Radar : Screen(Routes.RADAR, "Radar", Icons.Default.Radar)
+    object Home : Screen(Routes.DASHBOARD, "Home", Icons.Default.Home)
+    object Atlas : Screen(Routes.RADAR, "Atlas", Icons.Default.Radar)
     object Devices : Screen(Routes.DEVICES, "Devices", Icons.Default.Devices)
     object History : Screen(Routes.HISTORY, "History", Icons.Default.History)
-    object Statistics : Screen(Routes.STATISTICS, "Statistics", Icons.Default.BarChart)
-    object Settings : Screen(Routes.SETTINGS, "Settings", Icons.Default.Settings)
+    object More : Screen(Routes.MORE, "More", Icons.Default.MoreHoriz)
 }
 
 @Composable
@@ -57,13 +57,14 @@ fun AppNavigation(
     viewModel: DashboardViewModel,
 ) {
     val navController = rememberNavController()
+    // Four primary destinations plus a "More" hub keeps the bar uncluttered;
+    // Statistics and Settings live one level deeper.
     val items = listOf(
-        Screen.Dashboard,
-        Screen.Radar,
+        Screen.Home,
+        Screen.Atlas,
         Screen.Devices,
         Screen.History,
-        Screen.Statistics,
-        Screen.Settings
+        Screen.More,
     )
 
     Scaffold(
@@ -97,9 +98,8 @@ fun AppNavigation(
             composable(Routes.DASHBOARD) {
                 DashboardScreen(
                     vm = viewModel,
-                    onNavigateToRadar = { navController.navigate(Routes.RADAR) },
-                    onNavigateToDevices = { navController.navigate(Routes.DEVICES) },
-                ) { navController.navigate(Routes.HISTORY) }
+                    onNavigateToAtlas = { navController.navigate(Routes.RADAR) },
+                )
             }
             composable(Routes.RADAR) {
                 RadarScreen(
@@ -123,9 +123,11 @@ fun AppNavigation(
                 val historyVm: HistoryViewModel = viewModel()
                 HistoryScreen(vm = historyVm)
             }
-            composable(Routes.STATISTICS) {
-                val statsVm: StatisticsViewModel = viewModel()
-                StatisticsScreen(vm = statsVm)
+            composable(Routes.MORE) {
+                MoreScreen(
+                    onOpenStatistics = { navController.navigate(Routes.STATISTICS) },
+                    onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                )
             }
             composable(Routes.DEVICE_DETAILS) { backStackEntry ->
                 val type = backStackEntry.arguments?.getString("type") ?: ""
@@ -138,8 +140,12 @@ fun AppNavigation(
                     onBack = { navController.popBackStack() }
                 )
             }
+            composable(Routes.STATISTICS) {
+                val statsVm: StatisticsViewModel = viewModel()
+                StatisticsScreen(vm = statsVm, onBack = { navController.popBackStack() })
+            }
             composable(Routes.SETTINGS) {
-                SettingsScreen(vm = viewModel)
+                SettingsScreen(vm = viewModel, onBack = { navController.popBackStack() })
             }
         }
     }

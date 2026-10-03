@@ -113,27 +113,18 @@ class SecureActionAgent(
         }
 
         return verdict + vendorNote
-    }
-
-
-    @Synchronized
-    fun askQuestion(question: String, environmentContext: String): String {
+    }    @Synchronized
+    fun askQuestion(
+        question: String,
+        environmentContext: String,
+        history: List<ChatTurn> = emptyList(),
+    ): String {
         val inference = llmInference
         if (inference == null || isClosed || !File(modelPath).exists()) {
             return generateFallbackAnswer(question, environmentContext)
         }
 
-        val prompt = """
-<start_of_turn>user
-You are SOPHIA, a network security assistant embedded in a scanning app.
-Current environment: $environmentContext
-
-Answer the user's question in 2-3 plain sentences. Only mention the environment info above if it's actually relevant to the question — otherwise just answer generally. Do not use markdown, labels, or bullet points.
-
-Question: $question
-<end_of_turn>
-<start_of_turn>model
-""".trimIndent()
+        val prompt = buildChatPrompt(question, environmentContext, history)
 
         return try {
             val raw = inference.generateResponse(prompt)
@@ -147,9 +138,20 @@ Question: $question
     private fun generateFallbackAnswer(question: String, environmentContext: String): String {
         val q = question.lowercase()
         return when {
-            q.contains("public wi-fi") || q.contains("public wifi") || q.contains("safe to use") -> 
+            q.contains("how many") || q.contains("count") || q.contains("how much") -> {
+                val wifiCount = Regex("wifi=(\\d+)").find(environmentContext)?.groupValues?.get(1)
+                val btCount = Regex("bluetooth=(\\d+)").find(environmentContext)?.groupValues?.get(1)
+                if (wifiCount != null && btCount != null) {
+                    "My current scan context shows $wifiCount Wi-Fi network(s) and $btCount Bluetooth device(s). Open the Devices tab for the full list."
+                } else {
+                    "I can't confirm exact counts in offline mode — check the Devices tab for the live list."
+                }
+            }
+            q.contains("public wi-fi") || q.contains("public wifi") || q.contains("safe to use") ->
                 "Public Wi-Fi networks can expose your traffic to interception. Always use a trusted VPN and verify HTTPS connections before transmitting sensitive data."
-            q.contains("bluetooth") || q.contains("ble") || q.contains("beacon") -> 
+            q.contains("vpn") ->
+                "A VPN encrypts your traffic on untrusted networks, but it does not make a malicious hotspot safe — still verify sites use HTTPS and avoid entering credentials."
+            q.contains("bluetooth") || q.contains("ble") || q.contains("beacon") ->
                 "Unknown Bluetooth devices and beacons nearby may track your movement. Consider disabling Bluetooth when not in use or ignoring unrecognized pairings."
             q.contains("threat") || q.contains("risk") || q.contains("secure") -> 
                 "Review the radar screen for any high-risk signals or unauthorized devices. Ensure your device firmware and security settings are up to date."
@@ -158,16 +160,6 @@ Question: $question
             else -> 
                 "SOPHIA security assistant active (offline mode). Based on current environment ($environmentContext), monitor surrounding signals and investigate any unfamiliar devices immediately."
         }
-    }
-
-    private fun sanitizeChatResponse(raw: String): String {
-        return raw
-            .replace(Regex("<.*?>"), "")
-            .replace(Regex("\\*\\*"), "")
-            .replace(Regex("\\n+"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-            .ifBlank { "I don't have a good answer for that right now." }
     }
 
     fun close() {
@@ -179,4 +171,66 @@ Question: $question
         }
         llmInference = null
     }
+}
+
+/**
+ * Grounding rules placed in the current user turn, right before generation,
+ * so the model always sees them alongside the freshest scan context.
+ */
+private val GROUNDING_RULES = """
+You are S0PHIA, a network security assistant that runs fully on-device inside a Wi-Fi and Bluetooth scanning app.
+Ground every answer in the SCAN CONTEXT below. Never invent device names, addresses, IP addresses, or scan results: if the context does not contain the answer, say you do not have that data on-device.
+Answer in 2-3 plain sentences. No markdown, no bullet points, no labels.
+Only mention the scan context when it is actually relevant to the question — otherwise answer generally.
+""".trimIndent()
+
+/**
+ * Assembles the Gemma-format chat prompt. Prior conversation turns come first
+ * so follow-up questions keep their meaning, then the current turn re-states
+ * the grounding rules and the latest scan context.
+ */
+internal fun buildChatPrompt(
+    question: String,
+    environmentContext: String,
+    history: List<ChatTurn> = emptyList(),
+): String = buildString {
+    history.forEach { turn ->
+        if (turn.role == ChatTurn.ROLE_USER) {
+            append("<start_of_turn>user\n${turn.text}\n<end_of_turn>\n")
+        } else {
+            append("<start_of_turn>model\n${turn.text}\n<end_of_turn>\n")
+        }
+    }
+    append("<start_of_turn>user\n")
+    append(GROUNDING_RULES)
+    append("\n\nSCAN CONTEXT:\n")
+    append(environmentContext)
+    append("\n\nQuestion: ")
+    append(question)
+    append("\n<end_of_turn>\n")
+    append("<start_of_turn>model")
+}
+
+/**
+ * Cleans a raw model response: strips generation tags, leftover markdown,
+ * role labels, and runaway length so answers render cleanly in the chat card.
+ */
+internal fun sanitizeChatResponse(raw: String): String {
+    var text = raw
+        .substringBefore("<end_of_turn>")
+        .replace(Regex("<.*?>"), "")
+        .replace(Regex("[`*#~_]+"), "")
+        .replace(Regex("\\s+"), " ")
+        .replace(
+            Regex("^(?:model\\s+)?(?:s0phia|sophia|assistant|model)\\s*:\\s*", RegexOption.IGNORE_CASE),
+            "",
+        )
+        .trim()
+
+    if (text.length > 600) {
+        val cut = text.lastIndexOf(' ', 600)
+        text = text.substring(0, if (cut > 200) cut else 600).trimEnd() + "…"
+    }
+
+    return text.ifBlank { "I don't have a good answer for that right now." }
 }

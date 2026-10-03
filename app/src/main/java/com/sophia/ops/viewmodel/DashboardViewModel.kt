@@ -31,6 +31,7 @@ import com.sophia.ops.wifi.WifiScanner
 import com.sophia.ops.model.NetworkDevice
 import com.sophia.ops.model.DeviceType
 import com.sophia.ops.ai.SecureActionAgent
+import com.sophia.ops.ai.ChatTurn
 import com.sophia.ops.ai.DeviceSummary
 import com.sophia.ops.ai.AiAssessment
 import com.sophia.ops.ai.AssessmentEvidence
@@ -282,6 +283,9 @@ class DashboardViewModel(
     var chatAnswer by mutableStateOf<String?>(null)
         private set
 
+    /** Rolling on-device conversation (last 4 exchanges) so follow-up questions keep their meaning. */
+    val chatHistory = mutableStateListOf<ChatTurn>()
+
     var isChatLoading by mutableStateOf(false)
         private set
 
@@ -474,12 +478,26 @@ class DashboardViewModel(
 
         isChatLoading = true
         aiScope.launch(exceptionHandler) {
+            val promptQuestion = question.trim().take(500)
             val environmentContext = withContext(Dispatchers.Main) { buildBoundedChatContext() }
+            val history = withContext(Dispatchers.Main) {
+                // Failed turns stay visible in the chat but are not fed back to the model.
+                chatHistory.filterNot { it.text.startsWith("Error:") }.takeLast(8)
+            }
 
-            chatAnswer = try {
-                agent.askQuestion(question.take(500), environmentContext)
+            val answer = try {
+                agent.askQuestion(promptQuestion, environmentContext, history)
             } catch (t: Throwable) {
                 "Error: ${t.localizedMessage ?: t.javaClass.simpleName}"
+            }
+
+            withContext(Dispatchers.Main) {
+                chatAnswer = answer
+                chatHistory.add(ChatTurn(ChatTurn.ROLE_USER, promptQuestion))
+                chatHistory.add(ChatTurn(ChatTurn.ROLE_ASSISTANT, answer))
+                while (chatHistory.size > 8) {
+                    chatHistory.removeAt(0)
+                }
             }
             isChatLoading = false
         }

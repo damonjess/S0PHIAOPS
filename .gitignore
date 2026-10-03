@@ -29,3 +29,8 @@ model.task
 *.apk
 *.aab
 *.dex
+
+# Local test & debug artifacts
+.freebuff/
+screenshot-view.html
+

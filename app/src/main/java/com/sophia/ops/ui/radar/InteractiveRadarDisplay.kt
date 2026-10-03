@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -36,6 +37,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.sophia.ops.model.DeviceType
 import com.sophia.ops.model.NetworkDevice
+import com.sophia.ops.ui.theme.SophiaThemeColors
 import com.sophia.ops.viewmodel.DashboardViewModel
 import kotlin.math.PI
 import kotlin.math.cos
@@ -67,11 +69,6 @@ fun InteractiveRadarDisplay(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Signal Atlas",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = Color(0xFF72F5B2),
-                )
-                Text(
                     text = "Manual tactical map · no automatic movement",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -98,7 +95,8 @@ fun InteractiveRadarDisplay(
             Button(
                 onClick = { gestureMode = AtlasGestureMode.ROTATE },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (gestureMode == AtlasGestureMode.ROTATE) Color(0xFF176B48) else Color(0xFF202B27),
+                    containerColor = if (gestureMode == AtlasGestureMode.ROTATE) SophiaThemeColors.statusGreen else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = if (gestureMode == AtlasGestureMode.ROTATE) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                 ),
             ) {
                 Text("Rotate")
@@ -106,7 +104,8 @@ fun InteractiveRadarDisplay(
             Button(
                 onClick = { gestureMode = AtlasGestureMode.PAN },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (gestureMode == AtlasGestureMode.PAN) Color(0xFF176B48) else Color(0xFF202B27),
+                    containerColor = if (gestureMode == AtlasGestureMode.PAN) SophiaThemeColors.statusGreen else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = if (gestureMode == AtlasGestureMode.PAN) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                 ),
             ) {
                 Text("Pan")
@@ -114,7 +113,7 @@ fun InteractiveRadarDisplay(
             Text(
                 text = "${devices.size} signals",
                 style = MaterialTheme.typography.labelLarge,
-                color = Color(0xFF8EDBFF),
+                color = SophiaThemeColors.statusBlue,
                 modifier = Modifier.align(Alignment.CenterVertically),
             )
         }
@@ -129,20 +128,34 @@ fun InteractiveRadarDisplay(
             OutlinedButton(onClick = { heading = normalizeAngle(heading - 15f) }) { Text("← 15°") }
             OutlinedButton(onClick = { heading = 0f }) { Text("North") }
             OutlinedButton(onClick = { heading = normalizeAngle(heading + 15f) }) { Text("15° →") }
-            Spacer(modifier = Modifier.weight(1f))
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             OutlinedButton(onClick = { zoom = (zoom - 0.15f).coerceAtLeast(0.72f) }) { Text("−") }
             Text(
                 text = "${(zoom * vm.radarRangeMultiplier * 100).toInt()}%",
                 style = MaterialTheme.typography.labelLarge,
-                color = Color(0xFF72F5B2),
+                color = SophiaThemeColors.statusGreen,
             )
             OutlinedButton(onClick = { zoom = (zoom + 0.15f).coerceAtMost(1.75f) }) { Text("+") }
         }
 
+        // Hoisted theme colors: the draw scope below is not composable.
+        val mapBackground = MaterialTheme.colorScheme.background
+        val gridColor = SophiaThemeColors.statusGreen
+        val frameColor = SophiaThemeColors.statusBlue
+        val labelTint = MaterialTheme.colorScheme.onSurfaceVariant
+
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(390.dp)
+                .height(420.dp)
                 .padding(top = 12.dp)
                 .pointerInput(gestureMode) {
                     detectTransformGestures { _, pan, zoomChange, rotationChange ->
@@ -175,45 +188,64 @@ fun InteractiveRadarDisplay(
             val displayZoom = zoom * vm.radarRangeMultiplier
             val center = Offset(size.width / 2f + mapOffset.x, size.height / 2f + mapOffset.y)
             val radius = size.minDimension * 0.40f * displayZoom
-            val canvasBg = Color(0xFF09110E)
-            val grid = Color(0xFF72F5B2).copy(alpha = 0.25f)
-            val dimGrid = Color(0xFF72F5B2).copy(alpha = 0.10f)
+            val dimGrid = gridColor.copy(alpha = 0.10f)
+            val ringColor = gridColor.copy(alpha = 0.30f)
 
             drawRoundRect(
-                color = canvasBg,
+                color = mapBackground,
                 topLeft = Offset(0f, 0f),
                 size = size,
+                cornerRadius = CornerRadius(16.dp.toPx()),
             )
+
+            // Range rings — outer ring brighter.
             for (ring in 1..5) {
-                val ringRadius = radius * ring / 5f
                 drawCircle(
-                    color = if (ring == 5) grid else dimGrid,
-                    radius = ringRadius,
+                    color = if (ring == 5) ringColor else dimGrid,
+                    radius = radius * ring / 5f,
                     center = center,
-                    style = Stroke(width = if (ring == 5) 2f else 1f),
+                    style = Stroke(width = if (ring == 5) 1.6f else 1f),
                 )
             }
 
+            // Cardinal spokes only: a full spoke every 30° made the field noisy.
+            for (bearing in 0 until 360 step 90) {
+                val radians = Math.toRadians((bearing + heading).toDouble())
+                drawLine(
+                    color = dimGrid,
+                    start = center,
+                    end = Offset(
+                        center.x + sin(radians).toFloat() * radius,
+                        center.y - cos(radians).toFloat() * radius,
+                    ),
+                    strokeWidth = 1.4f,
+                )
+            }
+
+            // Short bearing ticks on the outer ring every 30°.
             for (bearing in 0 until 360 step 30) {
                 val radians = Math.toRadians((bearing + heading).toDouble())
-                val outer = Offset(
-                    center.x + sin(radians).toFloat() * radius,
-                    center.y - cos(radians).toFloat() * radius,
-                )
+                val dirX = sin(radians).toFloat()
+                val dirY = -cos(radians).toFloat()
                 drawLine(
-                    color = if (bearing % 90 == 0) grid else dimGrid,
-                    start = center,
-                    end = outer,
-                    strokeWidth = if (bearing % 90 == 0) 1.6f else 0.8f,
+                    color = ringColor,
+                    start = Offset(
+                        center.x + dirX * (radius - 7.dp.toPx()),
+                        center.y + dirY * (radius - 7.dp.toPx()),
+                    ),
+                    end = Offset(center.x + dirX * radius, center.y + dirY * radius),
+                    strokeWidth = if (bearing % 90 == 0) 2f else 1.2f,
                 )
             }
 
             val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 textSize = 11.dp.toPx()
-                typeface = android.graphics.Typeface.create(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
-                setShadowLayer(4f, 1f, 1f, android.graphics.Color.BLACK)
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
             }
-            val cardinalPaint = Paint(textPaint).apply { color = Color(0xFFB9FFD9).toArgb() }
+            val cardinalPaint = Paint(textPaint).apply {
+                textSize = 12.dp.toPx()
+                color = frameColor.toArgb()
+            }
             val cardinalOffset = radius + 15.dp.toPx()
             drawIntoCanvas { canvas ->
                 canvas.nativeCanvas.drawText("N", center.x - 4.dp.toPx(), center.y - cardinalOffset, cardinalPaint)
@@ -222,38 +254,100 @@ fun InteractiveRadarDisplay(
                 canvas.nativeCanvas.drawText("W", center.x - cardinalOffset - 10.dp.toPx(), center.y + 4.dp.toPx(), cardinalPaint)
             }
 
-            drawCircle(color = Color(0xFFB9FFD9), radius = 6.dp.toPx(), center = center)
-            drawCircle(color = Color(0xFF72F5B2).copy(alpha = 0.22f), radius = 18.dp.toPx(), center = center)
+            // Own position: halo, dot, heading line.
+            drawCircle(color = frameColor.copy(alpha = 0.22f), radius = 18.dp.toPx(), center = center)
+            drawCircle(color = frameColor, radius = 5.dp.toPx(), center = center)
             drawLine(
-                color = Color(0xFFB9FFD9),
+                color = frameColor.copy(alpha = 0.8f),
                 start = center,
                 end = Offset(center.x, center.y - radius * 0.24f),
-                strokeWidth = 3f,
+                strokeWidth = 2.5f,
                 cap = StrokeCap.Round,
             )
+
+            // Signals that earn a label: the selected target, the strongest few,
+            // and favourites. Everything else stays label-free to keep the field clean.
+            val selectedDevice = vm.selectedRadarDevice
+            val labelIds = linkedSetOf<String>()
+            selectedDevice?.let { labelIds.add(it.id) }
+            if (vm.radarLabelsEnabled) {
+                devices.sortedByDescending { it.signal }.take(6).forEach { labelIds.add(it.id) }
+                devices.filter { it.favourite }.take(3).forEach { labelIds.add(it.id) }
+            }
 
             devices.sortedBy { it.signal }.forEach { device ->
                 val position = atlasPoint(device, size, heading, displayZoom, mapOffset)
                 val color = markerColor(device)
-                val selected = vm.selectedRadarDevice?.id == device.id
-                val markerRadius = if (device.favourite) 9.dp.toPx() else 6.5.dp.toPx()
+                val isSelected = selectedDevice?.id == device.id
+                val markerRadius = if (device.favourite) 8.dp.toPx() else 6.dp.toPx()
 
-                if (selected) {
-                    drawCircle(color = Color.White.copy(alpha = 0.55f), radius = markerRadius * 2.35f, center = position, style = Stroke(width = 2.5f))
+                if (isSelected) {
+                    drawCircle(color = Color.White.copy(alpha = 0.55f), radius = markerRadius * 2.4f, center = position, style = Stroke(width = 2.5f))
                 }
-                drawCircle(color = color.copy(alpha = 0.16f), radius = markerRadius * 2.2f, center = position)
+                drawCircle(color = color.copy(alpha = 0.14f), radius = markerRadius * 2.1f, center = position)
                 drawCircle(color = color, radius = markerRadius, center = position)
+            }
 
-                if (vm.radarLabelsEnabled) {
-                    textPaint.color = color.toArgb()
-                    drawIntoCanvas { canvas ->
-                        canvas.nativeCanvas.drawText(
-                            device.name.take(18),
-                            position.x + markerRadius + 5.dp.toPx(),
-                            position.y - markerRadius,
-                            textPaint,
-                        )
+            // Labels drawn after the markers as chips, skipping any that would
+            // overlap a label already placed (the selected target always draws).
+            val chipFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+            val placedLabels = mutableListOf<android.graphics.RectF>()
+            var placedCount = 0
+            val labelPad = 4.dp.toPx()
+            val chipRadius = 6.dp.toPx()
+
+            devices.sortedByDescending { it.signal }.forEach { device ->
+                if (device.id !in labelIds) return@forEach
+
+                val position = atlasPoint(device, size, heading, displayZoom, mapOffset)
+                val color = markerColor(device)
+                val isSelected = selectedDevice?.id == device.id
+                val name = device.name.take(if (isSelected) 24 else 16)
+                val markerRadius = if (device.favourite) 8.dp.toPx() else 6.dp.toPx()
+
+                textPaint.textSize = if (isSelected) 12.dp.toPx() else 11.dp.toPx()
+                val textWidth = textPaint.measureText(name)
+                val chipHeight = textPaint.textSize * 1.5f
+                val chipWidth = textWidth + labelPad * 2
+
+                var left = position.x + markerRadius + 7.dp.toPx()
+                if (left + chipWidth > size.width - 3.dp.toPx()) {
+                    left = position.x - markerRadius - 7.dp.toPx() - chipWidth
+                }
+                if (left < 3.dp.toPx()) left = 3.dp.toPx()
+                val top = (position.y - chipHeight / 2f).coerceIn(3.dp.toPx(), size.height - chipHeight - 3.dp.toPx())
+                val rect = android.graphics.RectF(left, top, left + chipWidth, top + chipHeight)
+
+                if (!isSelected && placedLabels.any { android.graphics.RectF.intersects(it, rect) }) {
+                    return@forEach
+                }
+                if (!isSelected) placedLabels.add(rect)
+                placedCount++
+
+                drawIntoCanvas { canvas ->
+                    chipFill.color = android.graphics.Color.argb(if (isSelected) 232 else 175, 9, 13, 19)
+                    canvas.nativeCanvas.drawRoundRect(rect, chipRadius, chipRadius, chipFill)
+                    if (isSelected) {
+                        chipFill.style = Paint.Style.STROKE
+                        chipFill.strokeWidth = 1.5.dp.toPx()
+                        chipFill.color = color.toArgb()
+                        canvas.nativeCanvas.drawRoundRect(rect, chipRadius, chipRadius, chipFill)
+                        chipFill.style = Paint.Style.FILL
                     }
+                    textPaint.color = if (isSelected) android.graphics.Color.WHITE else color.toArgb()
+                    val baseline = rect.top + chipHeight / 2f - (textPaint.ascent() + textPaint.descent()) / 2f
+                    canvas.nativeCanvas.drawText(name, rect.left + labelPad, baseline, textPaint)
+                }
+            }
+
+            val hidden = devices.size - placedCount
+            if (hidden > 0) {
+                val hint = "+$hidden not labeled"
+                textPaint.textSize = 10.dp.toPx()
+                textPaint.color = labelTint.copy(alpha = 0.55f).toArgb()
+                val hintWidth = textPaint.measureText(hint)
+                drawIntoCanvas { canvas ->
+                    canvas.nativeCanvas.drawText(hint, size.width - hintWidth - 8.dp.toPx(), size.height - 8.dp.toPx(), textPaint)
                 }
             }
         }

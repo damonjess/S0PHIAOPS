@@ -13,6 +13,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -47,7 +50,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.onFocusChanged
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -67,6 +74,7 @@ import com.sophia.ops.data.OuiLookup
 import com.sophia.ops.data.DeviceDisposition
 import com.sophia.ops.ai.AiAssessment
 import com.sophia.ops.ai.AssessmentSeverity
+import com.sophia.ops.ai.ChatTurn
 import com.sophia.ops.ui.theme.SophiaThemeColors
 import com.sophia.ops.viewmodel.DashboardViewModel
 import kotlin.math.PI
@@ -115,6 +123,7 @@ fun RadarScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .imePadding()
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
@@ -123,10 +132,18 @@ fun RadarScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Signal Command",
-                style = MaterialTheme.typography.headlineMedium
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Signal Atlas",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                Text(
+                    text = "Scan, map, and assess nearby signals",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             AssistChip(
                 onClick = { },
                 label = {
@@ -148,7 +165,7 @@ fun RadarScreen(
                 },
                 modifier = Modifier.scale(scanButtonScale),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (vm.isScanning) Color(0xFF8B1E2D) else MaterialTheme.colorScheme.primary,
+                    containerColor = if (vm.isScanning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                 ),
             ) {
                 Text(if (vm.isScanning) "STOP SCAN" else "START SCAN")
@@ -234,9 +251,9 @@ fun RadarScreen(
                     label = "Highest Threat",
                     value = highestThreatToday,
                     color = when(highestThreatToday) {
-                        "HIGH" -> Color.Red
-                        "MEDIUM" -> Color.Yellow
-                        else -> Color.Green
+                        "HIGH" -> SophiaThemeColors.statusRed
+                        "MEDIUM" -> SophiaThemeColors.statusYellow
+                        else -> SophiaThemeColors.statusGreen
                     }
                 )
             }
@@ -247,28 +264,28 @@ fun RadarScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (vm.aiInitializationFailed) Color(0xFF3A1C1C) else Color(0xFF1E1E1E)
+                    containerColor = if (vm.aiInitializationFailed) MaterialTheme.colorScheme.errorContainer else SophiaThemeColors.cardContainer
                 )
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     if (vm.isAiLoading) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color.Green)
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = SophiaThemeColors.statusGreen)
                             Spacer(modifier = Modifier.width(12.dp))
                             Text("Loading Engine...", color = Color.White, style = MaterialTheme.typography.labelSmall)
                         }
                     } else if (vm.isDownloading) {
                         Text(
-                            text = "📥 DOWNLOADING TACTICAL MODEL",
-                            color = Color(0xFF00BCD4),
+                            text = "Downloading on-device model",
+                            color = MaterialTheme.colorScheme.primary,
                             style = MaterialTheme.typography.labelSmall
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         LinearProgressIndicator(
                             progress = { vm.downloadProgress },
                             modifier = Modifier.fillMaxWidth().height(8.dp),
-                            color = Color.Green,
-                            trackColor = Color.DarkGray
+                            color = SophiaThemeColors.statusGreen,
+                            trackColor = MaterialTheme.colorScheme.outline
                         )
                         Text(
                             text = "${(vm.downloadProgress * 100).toInt()}%",
@@ -279,14 +296,14 @@ fun RadarScreen(
                         )
                     } else if (!vm.isAiReady) {
                         Text(
-                            text = if (vm.aiInitializationFailed) "⚠️ AI INITIALIZATION FAILED" else "🤖 AI ENGINE STANDBY",
-                            color = if (vm.aiInitializationFailed) Color.Red else Color(0xFF00BCD4),
+                            text = if (vm.aiInitializationFailed) "AI initialization failed" else "AI engine on standby",
+                            color = if (vm.aiInitializationFailed) SophiaThemeColors.statusRed else MaterialTheme.colorScheme.primary,
                             style = MaterialTheme.typography.labelSmall
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = vm.aiAdviceText,
-                            color = Color.Gray,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
                         Spacer(modifier = Modifier.height(8.dp))
@@ -295,9 +312,9 @@ fun RadarScreen(
                             Button(
                                 onClick = { vm.activateOnDeviceAI() },
                                 modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BCD4))
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                             ) {
-                                Text("INITIALIZE")
+                                Text("Initialize")
                             }
                             
                             if (!vm.isModelPresent) {
@@ -305,16 +322,16 @@ fun RadarScreen(
                                 Button(
                                     onClick = { vm.downloadModel() },
                                     modifier = Modifier.weight(1f),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.outline)
                                 ) {
-                                    Text("DOWNLOAD")
+                                    Text("Download")
                                 }
                             }
                         }
                     } else {
                         Text(
-                            text = "🤖 SOPHIA SECURE ACTION AGENT",
-                            color = Color.Green,
+                            text = "On-device assistant",
+                            color = SophiaThemeColors.statusGreen,
                             style = MaterialTheme.typography.labelSmall
                         )
                         Spacer(modifier = Modifier.height(4.dp))
@@ -333,13 +350,13 @@ fun RadarScreen(
                                 modifier = Modifier.weight(1f).fillMaxSize(),
                                 enabled = !vm.isAnalyzing
                             ) {
-                                Text(if (vm.isAnalyzing) "Analyzing..." else "LOCAL ADVICE")
+                                Text(if (vm.isAnalyzing) "Analyzing..." else "Local advice")
                             }
 
                             Button(
                                 onClick = { vm.performGlobalIntelligenceSearch() },
                                 modifier = Modifier.weight(1f).fillMaxSize(),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00838F)),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                                 enabled = !vm.isAnalyzing && vm.isAiReady
                             ) {
                                 Text("GUIDANCE", color = Color.White)
@@ -380,7 +397,7 @@ fun RadarScreen(
                         Text(
                             text = "Target: ${device.name}",
                             style = MaterialTheme.typography.titleMedium,
-                            color = Color.Green,
+                            color = SophiaThemeColors.statusGreen,
                             modifier = Modifier.clickable { onDeviceClick(device) }
                         )
                         IconButton(onClick = { vm.selectDevice(null) }) {
@@ -395,7 +412,7 @@ fun RadarScreen(
                     Text(
                         text = "Address: ${device.address}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.Gray
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     
                     Text(
@@ -411,13 +428,13 @@ fun RadarScreen(
                     Text(
                         text = "Vendor: $vendorName",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF00BCD4)
+                        color = MaterialTheme.colorScheme.primary
                     )
                     
                     Text(
                         text = "Threat Level: ${device.threatScore.toInt()}%",
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (device.threatScore > 50) Color.Red else Color.Yellow
+                        color = if (device.threatScore > 50) SophiaThemeColors.statusRed else SophiaThemeColors.statusYellow
                     )
                     
                     Text(
@@ -431,8 +448,8 @@ fun RadarScreen(
                         text = "Review state: ${disposition.name.lowercase().replaceFirstChar { it.uppercase() }}",
                         style = MaterialTheme.typography.labelSmall,
                         color = when (disposition) {
-                            DeviceDisposition.TRUSTED -> Color(0xFF72F5B2)
-                            DeviceDisposition.WATCHLIST -> Color(0xFFFFD166)
+                            DeviceDisposition.TRUSTED -> SophiaThemeColors.statusGreen
+                            DeviceDisposition.WATCHLIST -> SophiaThemeColors.statusYellow
                             DeviceDisposition.UNREVIEWED -> Color.LightGray
                         },
                         modifier = Modifier.padding(top = 6.dp),
@@ -446,17 +463,17 @@ fun RadarScreen(
                         Button(
                             onClick = { vm.setDeviceDisposition(device.address, DeviceDisposition.TRUSTED) },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF176B48)),
-                        ) { Text("TRUST") }
+                            colors = ButtonDefaults.buttonColors(containerColor = SophiaThemeColors.statusGreen.copy(alpha = 0.18f), contentColor = SophiaThemeColors.statusGreen),
+                        ) { Text("Trust") }
                         Button(
                             onClick = { vm.setDeviceDisposition(device.address, DeviceDisposition.WATCHLIST) },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF825D18)),
-                        ) { Text("WATCH") }
+                            colors = ButtonDefaults.buttonColors(containerColor = SophiaThemeColors.statusYellow.copy(alpha = 0.18f), contentColor = SophiaThemeColors.statusYellow),
+                        ) { Text("Watch") }
                         TextButton(
                             onClick = { vm.setDeviceDisposition(device.address, DeviceDisposition.UNREVIEWED) },
                             modifier = Modifier.weight(0.7f),
-                        ) { Text("CLEAR") }
+                        ) { Text("Clear") }
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -485,10 +502,10 @@ fun RadarScreen(
                         Button(
                             onClick = { vm.performDeepScan(device) },
                             modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BCD4)),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                             enabled = vm.isAiReady
                         ) {
-                            Text("DEEP SCAN TARGET")
+                            Text("Deep scan target")
                         }
                     } else {
                         Card(
@@ -496,7 +513,7 @@ fun RadarScreen(
                             colors = CardDefaults.cardColors(
                                 containerColor = Color.Black.copy(alpha = 0.3f)
                             ),
-                            border = BorderStroke(1.dp, Color(0xFF00BCD4).copy(alpha = 0.5f))
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -504,14 +521,14 @@ fun RadarScreen(
                                         CircularProgressIndicator(
                                             modifier = Modifier.size(14.dp),
                                             strokeWidth = 2.dp,
-                                            color = Color(0xFF00BCD4)
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                     }
                                     Text(
-                                        text = "SOPHIA TARGET ANALYSIS",
+                                        text = "Target analysis",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = Color(0xFF00BCD4),
+                                        color = MaterialTheme.colorScheme.primary,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
@@ -539,11 +556,11 @@ fun RadarScreen(
                 Text(
                     text = "Local Assessment",
                     style = MaterialTheme.typography.titleMedium,
-                    color = Color(0xFF72F5B2),
+                    color = SophiaThemeColors.statusGreen,
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = { vm.analyzeThreat() }, enabled = !vm.isAnalyzing) {
-                    Text("REFRESH", color = Color(0xFF72F5B2), style = MaterialTheme.typography.labelSmall)
+                    Text("Refresh", color = SophiaThemeColors.statusGreen, style = MaterialTheme.typography.labelSmall)
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -553,7 +570,7 @@ fun RadarScreen(
                 vm.aiAssessment?.let { assessment -> StructuredAssessmentCard(assessment) } ?: Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19)),
+                    colors = CardDefaults.cardColors(containerColor = SophiaThemeColors.cardContainer),
                 ) {
                     Text(
                         text = vm.aiResponse ?: "No assessment is available.",
@@ -569,16 +586,16 @@ fun RadarScreen(
         if (vm.strategicBrief != null) {
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = "TACTICAL STRATEGIC BRIEF",
+                text = "Strategic brief",
                 style = MaterialTheme.typography.titleSmall,
-                color = Color.Red,
+                color = SophiaThemeColors.statusRed,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(8.dp))
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(2.dp, Color.Red),
+                border = BorderStroke(2.dp, SophiaThemeColors.statusRed),
                 colors = CardDefaults.cardColors(
                     containerColor = Color.Black
                 )
@@ -608,8 +625,8 @@ private fun SignalHistoryPanel(vm: DashboardViewModel) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19)),
-        border = BorderStroke(1.dp, Color(0xFF45F08A).copy(alpha = 0.25f)),
+        colors = CardDefaults.cardColors(containerColor = SophiaThemeColors.cardContainer),
+        border = BorderStroke(1.dp, SophiaThemeColors.statusGreen.copy(alpha = 0.25f)),
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
@@ -620,12 +637,12 @@ private fun SignalHistoryPanel(vm: DashboardViewModel) {
                 Text(
                     text = "Signal History",
                     style = MaterialTheme.typography.titleMedium,
-                    color = Color(0xFF45F08A),
+                    color = SophiaThemeColors.statusGreen,
                 )
                 Text(
                     text = "Persisted",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF7DEEFF),
+                    color = SophiaThemeColors.statusBlue,
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -634,7 +651,7 @@ private fun SignalHistoryPanel(vm: DashboardViewModel) {
                 Text(
                     text = "No saved signals yet. Run a scan to begin the timeline.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
                 devices.forEach { device ->
@@ -647,9 +664,9 @@ private fun SignalHistoryPanel(vm: DashboardViewModel) {
                     }
                     val latestRssi = device.signalHistory.lastOrNull()?.rssi ?: device.rssi
                     val riskColor = when {
-                        device.riskScore > 50 -> Color(0xFFFF6161)
-                        device.riskScore > 20 -> Color(0xFFFFD166)
-                        else -> Color(0xFF45F08A)
+                        device.riskScore > 50 -> SophiaThemeColors.statusRed
+                        device.riskScore > 20 -> SophiaThemeColors.statusYellow
+                        else -> SophiaThemeColors.statusGreen
                     }
 
                     Row(
@@ -677,7 +694,7 @@ private fun SignalHistoryPanel(vm: DashboardViewModel) {
                             Text(
                                 text = "${DateUtils.getRelativeTimeSpanString(device.lastSeen)}  •  ${device.signalHistory.size} samples",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color.Gray,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         Column(horizontalAlignment = Alignment.End) {
@@ -705,10 +722,11 @@ private fun SignalSparkline(
     color: Color,
     modifier: Modifier = Modifier,
 ) {
+    val mutedLineColor = MaterialTheme.colorScheme.onSurfaceVariant
     androidx.compose.foundation.Canvas(modifier = modifier) {
         if (points.isEmpty()) {
             drawLine(
-                color = Color.Gray.copy(alpha = 0.35f),
+                color = mutedLineColor.copy(alpha = 0.35f),
                 start = Offset(0f, size.height / 2f),
                 end = Offset(size.width, size.height / 2f),
                 strokeWidth = 2f,
@@ -806,20 +824,32 @@ fun LegendItem(label: String, color: Color) {
 @Composable
 fun AskSophiaCard(vm: DashboardViewModel) {
     var questionText by remember { mutableStateOf("") }
+    // When the keyboard opens, scroll the Ask button above the IME so it stays tappable.
+    val askButtonView = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+        colors = CardDefaults.cardColors(containerColor = SophiaThemeColors.cardContainer)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Ask SOPHIA", style = MaterialTheme.typography.titleMedium, color = Color(0xFF4CAF50))
+            Text("Ask S0PHIA", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
 
             OutlinedTextField(
                 value = questionText,
                 onValueChange = { questionText = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("e.g. Is it safe to use public Wi-Fi?", color = Color.Gray) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { focusState ->
+                        if (focusState.isFocused) {
+                            scope.launch {
+                                delay(250)
+                                askButtonView.bringIntoView()
+                            }
+                        }
+                    },
+                placeholder = { Text("e.g. Is it safe to use public Wi-Fi?", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 enabled = !vm.isChatLoading,
                 textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White)
             )
@@ -831,16 +861,42 @@ fun AskSophiaCard(vm: DashboardViewModel) {
                     vm.askSophia(questionText)
                     questionText = ""
                 },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .bringIntoViewRequester(askButtonView),
                 enabled = !vm.isChatLoading && questionText.isNotBlank() && vm.isAiReady,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
                 Text(if (vm.isChatLoading) "Thinking..." else "Ask")
             }
 
-            vm.chatAnswer?.let { answer ->
+            if (vm.chatHistory.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
-                Text(answer, style = MaterialTheme.typography.bodyMedium, color = Color.White)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    vm.chatHistory.takeLast(6).forEach { turn ->
+                        val isUser = turn.role == ChatTurn.ROLE_USER
+                        Text(
+                            text = if (isUser) "You: ${turn.text}" else "S0PHIA: ${turn.text}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (isUser) MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    if (vm.isChatLoading) {
+                        Text(
+                            text = "S0PHIA: thinking…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            } else if (vm.isChatLoading) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = "S0PHIA: thinking…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -851,8 +907,8 @@ private fun AnalystLoadingCard() {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19)),
-        border = BorderStroke(1.dp, Color(0xFF72F5B2).copy(alpha = 0.35f)),
+        colors = CardDefaults.cardColors(containerColor = SophiaThemeColors.cardContainer),
+        border = BorderStroke(1.dp, SophiaThemeColors.statusGreen.copy(alpha = 0.35f)),
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -860,7 +916,7 @@ private fun AnalystLoadingCard() {
         ) {
             CircularProgressIndicator(
                 modifier = Modifier.size(18.dp),
-                color = Color(0xFF72F5B2),
+                color = SophiaThemeColors.statusGreen,
                 strokeWidth = 2.dp,
             )
             Spacer(modifier = Modifier.width(12.dp))
@@ -876,16 +932,16 @@ private fun AnalystLoadingCard() {
 @Composable
 private fun StructuredAssessmentCard(assessment: AiAssessment) {
     val severityColor = when (assessment.severity) {
-        AssessmentSeverity.CRITICAL -> Color(0xFFFF5252)
-        AssessmentSeverity.HIGH -> Color(0xFFFF8A65)
-        AssessmentSeverity.MEDIUM -> Color(0xFFFFD166)
-        AssessmentSeverity.LOW -> Color(0xFF72F5B2)
+        AssessmentSeverity.CRITICAL -> SophiaThemeColors.statusRed
+        AssessmentSeverity.HIGH -> SophiaThemeColors.statusOrange
+        AssessmentSeverity.MEDIUM -> SophiaThemeColors.statusYellow
+        AssessmentSeverity.LOW -> SophiaThemeColors.statusGreen
     }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF151C19)),
+        colors = CardDefaults.cardColors(containerColor = SophiaThemeColors.cardContainer),
         border = BorderStroke(1.dp, severityColor.copy(alpha = 0.5f)),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -903,7 +959,7 @@ private fun StructuredAssessmentCard(assessment: AiAssessment) {
                 Text(
                     text = "Confidence: ${assessment.confidence.name.lowercase().replaceFirstChar { it.uppercase() }}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFFB9FFD9),
+                    color = SophiaThemeColors.statusGreen,
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -916,19 +972,19 @@ private fun StructuredAssessmentCard(assessment: AiAssessment) {
 
             AssessmentSection("Evidence") {
                 assessment.evidence.forEach { item ->
-                    EvidenceRow(item.label, item.detail, Color(0xFF8EDBFF))
+                    EvidenceRow(item.label, item.detail, SophiaThemeColors.statusBlue)
                 }
             }
             AssessmentSection("What changed") {
                 assessment.changes.forEach { item ->
-                    EvidenceRow(item.label, item.detail, Color(0xFF72F5B2))
+                    EvidenceRow(item.label, item.detail, SophiaThemeColors.statusGreen)
                 }
             }
             AssessmentSection("Uncertainty") {
                 Text(
                     text = assessment.uncertainty,
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFFFD166),
+                    color = SophiaThemeColors.statusYellow,
                 )
             }
             AssessmentSection("Recommended next step") {
@@ -942,7 +998,7 @@ private fun StructuredAssessmentCard(assessment: AiAssessment) {
                     Text(
                         text = "Review required before taking any action that changes a device or connection.",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFFB9FFD9),
+                        color = SophiaThemeColors.statusGreen,
                     )
                 }
             }
@@ -959,7 +1015,7 @@ private fun AssessmentSection(
     Text(
         text = title.uppercase(),
         style = MaterialTheme.typography.labelSmall,
-        color = Color(0xFF72F5B2),
+        color = SophiaThemeColors.statusGreen,
         fontWeight = FontWeight.Bold,
     )
     Spacer(modifier = Modifier.height(5.dp))
