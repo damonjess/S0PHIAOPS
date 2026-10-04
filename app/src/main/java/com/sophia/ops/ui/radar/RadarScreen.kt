@@ -194,23 +194,11 @@ fun RadarScreen(
             }
         }
 
-        Row(
-            modifier = Modifier
-                .padding(vertical = 4.dp)
-                .fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
-        ) {
-            LegendItem("Wi-Fi", SophiaThemeColors.statusGreen)
-            Spacer(modifier = Modifier.width(8.dp))
-            LegendItem("BT", SophiaThemeColors.statusBlue)
-            Spacer(modifier = Modifier.width(8.dp))
-            LegendItem("Fav", SophiaThemeColors.statusYellow)
-        }
-
         val devicesList = vm.allRadarDevices
         InteractiveRadarDisplay(
             vm = vm,
             devices = devicesList,
+            sweepAngle = sweepAngle,
         )
 
         // Today's Activity Section
