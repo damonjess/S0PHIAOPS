@@ -1,7 +1,6 @@
 package com.sophia.ops.ui.radar
 
 import android.graphics.Paint
-import android.graphics.RectF
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -41,6 +40,8 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -58,26 +59,33 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 private enum class AtlasGestureMode { ROTATE, PAN }
 
-// Reference palette: deep-space navy with cyan instrumentation, green Wi-Fi
-// circles and blue Bluetooth hexagons — cloned from the requested mock.
-private val SpatialPanelBackground = Color(0xFF04090F)
-private val CyanBright = Color(0xFF5FE0FF)
+// ── Palette (sampled from the reference mock) ────────────────────────────────
+private val SpatialPanelBackground = Color(0xFF03080E)
+private val CyanBright = Color(0xFF6BE6FF)
 private val CyanMid = Color(0xFF3EC7F0)
 private val RingGreen = Color(0xFF57EE8C)
-private val WifiGreen = Color(0xFF45E07C)
-private val BluetoothBlue = Color(0xFF41C6F2)
+private val WifiGreen = Color(0xFF3FD878)
+private val LimeLine = Color(0xFFB4F26A)
+private val BluetoothBlue = Color(0xFF35BDEF)
 private val FavAmber = Color(0xFFFFC94D)
 private val RiskRed = Color(0xFFFF6B63)
 private val RiskOrange = Color(0xFFFFA76B)
+private val NodeOutline = Color(0xFF06121C)
 private val LegendText = Color(0xCCBFE9FF)
 
+// ── Layout, as fractions of the canvas' smaller side / of the main ring ──────
+private const val RING_FRACTION = 0.34f    // main "10m" ring radius
+private const val COMPASS_FRACTION = 0.32f // compass disc, relative to main ring
+private const val MID_RING = 0.57f         // "5m" ring, relative to main ring
+private const val HALO = 1.22f             // thin outer halo ring, relative to main ring
+
 /**
- * Spatial network map styled after the operator reference display: cyan
- * instrumentation on a deep navy field, green Wi-Fi circles, blue Bluetooth
- * hexagons, radial connection lines, leader callout lines, and a sweep beam.
+ * Spatial network map styled after the operator reference display.
+ * Displays real scanned Wi-Fi and Bluetooth devices.
  */
 @Composable
 fun InteractiveRadarDisplay(
@@ -101,57 +109,16 @@ fun InteractiveRadarDisplay(
         }
     }
 
-    // Ensure we have a rich spatial distribution matching the reference mock
-    val displayDevices = remember(devices) {
-        val supplemented = devices.filterNot { 
-            it.name == "vodafone8E27A5" || it.name == "VM7519251" || it.name == "VM9668153" 
-        }.toMutableList()
+    val displayDevices = devices
 
-        // 3 primary callout targets from reference image
-        val refTargets = listOf(
-            Triple("78:E2:BD:8E:27:A5", "vodafone8E27A5", 42f to -42),
-            Triple("00:24:89:75:19:25", "VM7519251", 215f to -58),
-            Triple("80:16:05:96:68:15", "VM9668153", 135f to -50)
-        )
+    // Rank-based radial placement: spreads nodes across the 5m..10m band instead
+    // of piling them all on the rim when every real signal is weak (-80..-95 dBm).
+    val radialFractions = remember(displayDevices) { computeRadialFractions(displayDevices) }
 
-        refTargets.forEach { (addr, name, angleAndSig) ->
-            supplemented.add(
-                NetworkDevice(
-                    id = addr,
-                    name = name,
-                    address = addr,
-                    vendor = "Vodafone / Virgin Media",
-                    type = DeviceType.WIFI,
-                    signal = angleAndSig.second,
-                    riskScore = 15,
-                    radarAngle = angleAndSig.first,
-                )
-            )
-        }
-
-        // Fill remaining with spatial Bluetooth & WiFi signals if sparse
-        if (supplemented.size < 45) {
-            val needed = 55 - supplemented.size
-            for (i in 0 until needed) {
-                val isWifi = (i % 6 == 0)
-                val angle = (i * 137.5f + (i % 5) * 11f) % 360f
-                val signal = -35 - (i * 7) % 55
-                val addr = String.format(Locale.US, "E8:99:C4:%02X:%02X:%02X", i, (i * 19) % 256, (i * 37) % 256)
-                supplemented.add(
-                    NetworkDevice(
-                        id = "spatial_node_$i",
-                        name = if (isWifi) "VM${(i * 12345) % 9000000 + 1000000}" else "BLE_Beacon_$i",
-                        address = addr,
-                        vendor = if (isWifi) "Broadcom" else "Nordic Semi",
-                        type = if (isWifi) DeviceType.WIFI else DeviceType.BLUETOOTH,
-                        signal = signal,
-                        riskScore = if (i % 8 == 0) 55 else 10,
-                        radarAngle = angle,
-                    )
-                )
-            }
-        }
-        supplemented
+    // Bluetooth first, Wi-Fi on top (as in the mock), capped to strongest 60 devices.
+    val drawOrder = remember(displayDevices) {
+        displayDevices.sortedByDescending { it.signal }.take(60)
+            .sortedBy { if (it.type == DeviceType.WIFI) 1 else 0 }
     }
 
     Column(modifier = modifier.fillMaxWidth().aspectRatio(1f)) {
@@ -173,118 +140,96 @@ fun InteractiveRadarDisplay(
                             }
                         }
                     }
-                    .pointerInput(displayDevices, heading, zoom, mapOffset, vm.radarRangeMultiplier, vm.selectedRadarDevice) {
+                    .pointerInput(displayDevices, radialFractions, heading, zoom, mapOffset, vm.radarRangeMultiplier, vm.selectedRadarDevice) {
                         detectTapGestures { tap ->
                             val viewport = Size(size.width.toFloat(), size.height.toFloat())
-                            val hit = displayDevices.minByOrNull { device ->
-                                val point = atlasPoint(device, viewport, heading, zoom * vm.radarRangeMultiplier, mapOffset)
-                                hypot((tap.x - point.x).toDouble(), (tap.y - point.y).toDouble())
-                            }?.takeIf { device ->
-                                val point = atlasPoint(device, viewport, heading, zoom * vm.radarRangeMultiplier, mapOffset)
-                                hypot((tap.x - point.x).toDouble(), (tap.y - point.y).toDouble()) <= 60.0
+                            val hitRadius = 48f * (minOf(viewport.width, viewport.height) / 1000f)
+                            fun distanceTo(device: NetworkDevice): Double {
+                                val point = atlasPoint(
+                                    device, viewport, heading, zoom * vm.radarRangeMultiplier, mapOffset,
+                                    radialFractions[device.id] ?: 0.8f,
+                                )
+                                return hypot((tap.x - point.x).toDouble(), (tap.y - point.y).toDouble())
                             }
+                            val hit = displayDevices.minByOrNull { distanceTo(it) }
+                                ?.takeIf { distanceTo(it) <= hitRadius }
                             vm.selectDevice(if (hit != null && hit.id == vm.selectedRadarDevice?.id) null else hit)
                         }
                     },
             ) {
+                // All sizes are expressed in "u": 1u = 1/1000 of the canvas' smaller side,
+                // so the whole display scales identically on any screen.
+                val u = size.minDimension / 1000f
                 val displayZoom = zoom * vm.radarRangeMultiplier
-                val center = Offset(size.width / 2f + mapOffset.x, size.height / 2f + mapOffset.y)
-                // Radius leaving vertical margin so Cardinal N sits comfortably below title and Cardinal S sits above UTC bar.
-                val radius = size.minDimension * 0.33f * displayZoom
+                val center = Offset(size.width / 2f + mapOffset.x, size.height / 2f + 8f * u + mapOffset.y)
+                val radius = size.minDimension * RING_FRACTION * displayZoom
+                val compassRadius = radius * COMPASS_FRACTION
+                val midRadius = radius * MID_RING
                 val selectedDevice = vm.selectedRadarDevice
-                val compassRadius = radius * 0.28f
 
                 // Panel backdrop + hairline frame.
                 val panelCorner = CornerRadius(20.dp.toPx())
-                drawRoundRect(
-                    color = SpatialPanelBackground,
-                    topLeft = Offset(0f, 0f),
-                    size = size,
-                    cornerRadius = panelCorner,
-                )
+                drawRoundRect(color = SpatialPanelBackground, size = size, cornerRadius = panelCorner)
                 drawRoundRect(
                     color = CyanMid.copy(alpha = 0.25f),
-                    topLeft = Offset(0f, 0f),
                     size = size,
                     cornerRadius = panelCorner,
                     style = Stroke(width = 1.2f),
                 )
 
-                // Ambient center bloom
+                // Ambient bloom
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(CyanMid.copy(alpha = 0.12f), Color.Transparent),
+                        colors = listOf(CyanMid.copy(alpha = 0.16f), CyanMid.copy(alpha = 0.05f), Color.Transparent),
                         center = center,
-                        radius = radius * 1.1f,
+                        radius = radius * HALO,
                     ),
-                    radius = radius * 1.1f,
+                    radius = radius * HALO,
                     center = center,
                 )
 
-                // Sweep beam: continuous rotation when scanning, rests at 42° (NE) when idle
-                val beamAngle = if (vm.isScanning) sweepAngle else 42f
-                val beamAlpha = if (vm.isScanning) 0.32f else 0.18f
-                drawArc(
-                    brush = Brush.radialGradient(
-                        colors = listOf(CyanBright.copy(alpha = beamAlpha), Color.Transparent),
-                        center = center,
-                        radius = radius,
-                    ),
-                    startAngle = beamAngle - 55f,
-                    sweepAngle = 55f,
-                    useCenter = true,
-                    topLeft = Offset(center.x - radius, center.y - radius),
-                    size = Size(radius * 2f, radius * 2f),
-                )
-                val beamRadians = Math.toRadians(beamAngle.toDouble())
-                drawLine(
-                    color = CyanBright.copy(alpha = 0.85f),
-                    start = center,
-                    end = Offset(
-                        center.x + cos(beamRadians).toFloat() * radius,
-                        center.y + sin(beamRadians).toFloat() * radius,
-                    ),
-                    strokeWidth = 1.8.dp.toPx(),
-                )
-
-                // Outer halo plus concentric range rings
-                drawCircle(
-                    color = CyanMid.copy(alpha = 0.15f),
-                    radius = radius * 1.06f,
-                    center = center,
-                    style = Stroke(width = 1.2f),
-                )
-                for (ring in listOf(2, 5, 10)) {
-                    val ringRadius = radius * ring / 10f
-                    val ringAlpha = if (ring == 10) 0.50f else 0.22f
+                // Fine "ripple" rings between the 5m ring and the halo
+                for (i in 0..13) {
                     drawCircle(
-                        color = CyanMid.copy(alpha = ringAlpha),
-                        radius = ringRadius,
+                        color = CyanMid.copy(alpha = 0.05f),
+                        radius = radius * (0.60f + i * 0.045f),
                         center = center,
-                        style = Stroke(width = if (ring == 10) 1.8f else 1f),
+                        style = Stroke(width = 1f),
                     )
                 }
 
-                // Range labels ("2m", "5m", "10m") positioned along crosshairs
+                // Sweep beam (idle pose is NE, like the mock)
+                drawSweep(center, radius, if (vm.isScanning) sweepAngle else -42f, vm.isScanning, u)
+
+                // Halo ring (thin) – outside the main ring
+                drawCircle(
+                    color = CyanMid.copy(alpha = 0.55f),
+                    radius = radius * HALO,
+                    center = center,
+                    style = Stroke(width = 1.8f * u),
+                )
+
+                // Main ring with soft glow (3 strokes: wide faint → crisp)
+                drawCircle(CyanMid.copy(alpha = 0.10f), radius, center, style = Stroke(width = 16f * u))
+                drawCircle(CyanMid.copy(alpha = 0.22f), radius, center, style = Stroke(width = 7f * u))
+                drawCircle(CyanBright.copy(alpha = 0.85f), radius, center, style = Stroke(width = 2.4f * u))
+
+                // 5m ring
+                drawCircle(CyanMid.copy(alpha = 0.14f), midRadius, center, style = Stroke(width = 6f * u))
+                drawCircle(CyanMid.copy(alpha = 0.60f), midRadius, center, style = Stroke(width = 1.8f * u))
+
+                // Range labels
                 val ringLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    textSize = 9.dp.toPx()
-                    color = Color(0xC078DCF5).toArgb()
+                    textSize = 21f * u
+                    color = Color(0xB078DCF5).toArgb()
                 }
                 drawIntoCanvas { canvas ->
                     val native = canvas.nativeCanvas
-                    // 2m labels
-                    val r2 = radius * 0.2f
-                    native.drawText("2m", center.x + 3.dp.toPx(), center.y - r2 - 3.dp.toPx(), ringLabelPaint)
-                    native.drawText("2m", center.x - r2 - ringLabelPaint.measureText("2m") - 3.dp.toPx(), center.y - 3.dp.toPx(), ringLabelPaint)
-
-                    // 5m labels
-                    val r5 = radius * 0.5f
-                    native.drawText("5m", center.x + 3.dp.toPx(), center.y - r5 - 3.dp.toPx(), ringLabelPaint)
-                    native.drawText("5m", center.x + r5 + 3.dp.toPx(), center.y - 3.dp.toPx(), ringLabelPaint)
-
-                    // 10m label
-                    val r10 = radius * 0.98f
-                    native.drawText("10m", center.x + r10 - ringLabelPaint.measureText("10m") - 3.dp.toPx(), center.y - 3.dp.toPx(), ringLabelPaint)
+                    val pad = 6f * u
+                    native.drawText("2m", center.x - compassRadius - ringLabelPaint.measureText("2m") - pad, center.y - pad, ringLabelPaint)
+                    native.drawText("5m", center.x + pad, center.y - midRadius - pad, ringLabelPaint)
+                    native.drawText("5m", center.x + midRadius + pad, center.y - pad, ringLabelPaint)
+                    native.drawText("10m", center.x + radius - ringLabelPaint.measureText("10m") - pad, center.y - pad, ringLabelPaint)
                 }
 
                 // Cardinal spokes & tick marks
@@ -293,10 +238,7 @@ fun InteractiveRadarDisplay(
                     drawLine(
                         color = CyanMid.copy(alpha = 0.20f),
                         start = center,
-                        end = Offset(
-                            center.x + sin(radians).toFloat() * radius,
-                            center.y - cos(radians).toFloat() * radius,
-                        ),
+                        end = Offset(center.x + sin(radians).toFloat() * radius, center.y - cos(radians).toFloat() * radius),
                         strokeWidth = 1.2f,
                     )
                 }
@@ -306,226 +248,119 @@ fun InteractiveRadarDisplay(
                     val dirY = -cos(radians).toFloat()
                     drawLine(
                         color = CyanMid.copy(alpha = 0.45f),
-                        start = Offset(
-                            center.x + dirX * (radius - 6.dp.toPx()),
-                            center.y + dirY * (radius - 6.dp.toPx()),
-                        ),
+                        start = Offset(center.x + dirX * (radius - 12f * u), center.y + dirY * (radius - 12f * u)),
                         end = Offset(center.x + dirX * radius, center.y + dirY * radius),
                         strokeWidth = if (bearing % 90 == 0) 2f else 1.2f,
                     )
                 }
 
-                // Outer Cardinal Letters (N, E, S, W) - Bold cyan, perfectly placed
+                // Outer cardinal letters
                 val outerCardinalPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    textSize = 18.dp.toPx()
+                    textSize = radius * 0.10f
                     typeface = android.graphics.Typeface.DEFAULT_BOLD
                     color = CyanBright.toArgb()
                 }
-                val cardinalDistance = radius + 15.dp.toPx()
+                val cardinalDistance = radius * 1.14f
                 drawIntoCanvas { canvas ->
                     val native = canvas.nativeCanvas
                     listOf(0f to "N", 90f to "E", 180f to "S", 270f to "W").forEach { (bearing, letter) ->
                         val radians = Math.toRadians((bearing + heading).toDouble())
                         val x = center.x + sin(radians).toFloat() * cardinalDistance
                         val y = center.y - cos(radians).toFloat() * cardinalDistance
-                        val textWidth = outerCardinalPaint.measureText(letter)
-                        native.drawText(
-                            letter,
-                            x - textWidth / 2f,
-                            y + outerCardinalPaint.textSize / 3f,
-                            outerCardinalPaint
-                        )
+                        native.drawText(letter, x - outerCardinalPaint.measureText(letter) / 2f, y + outerCardinalPaint.textSize / 3f, outerCardinalPaint)
                     }
                 }
 
-                // Center Compass Rose: Dark disc, cyan rim, crosshairs, N/E/S/W letters, North arrow
-                drawCircle(color = Color(0xFF05111B), radius = compassRadius, center = center)
-                drawCircle(
-                    color = CyanMid.copy(alpha = 0.15f),
-                    radius = compassRadius * 1.15f,
-                    center = center,
-                    style = Stroke(width = 1f),
-                )
-                drawCircle(
-                    color = CyanMid.copy(alpha = 0.60f),
-                    radius = compassRadius,
-                    center = center,
-                    style = Stroke(width = 1.5.dp.toPx()),
-                )
-
-                // Crosshairs
-                val armLen = compassRadius * 0.85f
-                drawLine(
-                    color = CyanBright.copy(alpha = 0.75f),
-                    start = Offset(center.x - armLen, center.y),
-                    end = Offset(center.x + armLen, center.y),
-                    strokeWidth = 1.5.dp.toPx()
-                )
-                drawLine(
-                    color = CyanBright.copy(alpha = 0.75f),
-                    start = Offset(center.x, center.y - armLen),
-                    end = Offset(center.x, center.y + armLen),
-                    strokeWidth = 1.5.dp.toPx()
-                )
-
-                // North Arrowhead pointing straight UP
-                val arrowWidth = 5.dp.toPx()
-                val arrowTipY = center.y - compassRadius * 0.75f
-                val arrowBaseY = center.y - compassRadius * 0.20f
-                val arrowPath = Path().apply {
-                    moveTo(center.x, arrowTipY)
-                    lineTo(center.x + arrowWidth, arrowBaseY)
-                    lineTo(center.x - arrowWidth, arrowBaseY)
-                    close()
+                // Which devices get a callout pill / emphasis ring
+                val calloutDevices = displayDevices
+                    .filter { it.type == DeviceType.WIFI }
+                    .sortedByDescending { it.signal }
+                    .take(3)
+                val labelDevices = buildList {
+                    selectedDevice?.let { add(it) }
+                    calloutDevices.forEach { d -> if (none { it.id == d.id }) add(d) }
                 }
-                drawPath(arrowPath, CyanBright)
-                drawCircle(color = CyanBright, radius = 2.5.dp.toPx(), center = center)
+                val ringedIds = labelDevices.map { it.id }.toSet()
 
-                // Compass inner letters
-                val compassPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    textSize = 10.dp.toPx()
-                    typeface = android.graphics.Typeface.DEFAULT_BOLD
-                    color = CyanBright.toArgb()
-                }
-                drawIntoCanvas { canvas ->
-                    val native = canvas.nativeCanvas
-                    val letterRing = compassRadius * 0.52f
-                    listOf(0f to "N", 90f to "E", 180f to "S", 270f to "W").forEach { (bearing, letter) ->
-                        val radians = Math.toRadians((bearing + heading).toDouble())
-                        val x = center.x + sin(radians).toFloat() * letterRing
-                        val y = center.y - cos(radians).toFloat() * letterRing
-                        val textWidth = compassPaint.measureText(letter)
-                        native.drawText(letter, x - textWidth / 2f, y + compassPaint.textSize / 3f, compassPaint)
-                    }
+                // Curved connection lines (node → compass rim)
+                val nodeRadius = (if (drawOrder.size > 45) 19f else 24f) * u
+                drawOrder.forEach { device ->
+                    val position = atlasPoint(device, size, heading, displayZoom, mapOffset, radialFractions[device.id] ?: 0.8f)
+                    drawLink(center, compassRadius, position, nodeRadius, device, u)
                 }
 
-                // Spatial Network Web: Thin translucent radial connecting lines from each node toward center
-                displayDevices.forEach { device ->
-                    val position = atlasPoint(device, size, heading, displayZoom, mapOffset)
-                    val deltaX = position.x - center.x
-                    val deltaY = position.y - center.y
-                    val distance = hypot(deltaX.toDouble(), deltaY.toDouble()).toFloat()
-                    if (distance <= compassRadius + 4.dp.toPx()) return@forEach
+                // Compass rose (above the lines, below the nodes)
+                drawCompass(center, compassRadius, heading, u)
 
-                    val dirX = deltaX / distance
-                    val dirY = deltaY / distance
-                    val startDist = distance - 8.dp.toPx()
-                    val endDist = compassRadius + 2.dp.toPx()
-
-                    val lineAlpha = if (device.type == DeviceType.WIFI) 0.35f else 0.22f
-                    val lineColor = if (device.type == DeviceType.WIFI) WifiGreen.copy(alpha = lineAlpha) else BluetoothBlue.copy(alpha = lineAlpha)
-
-                    drawLine(
-                        color = lineColor,
-                        start = Offset(center.x + dirX * startDist, center.y + dirY * startDist),
-                        end = Offset(center.x + dirX * endDist, center.y + dirY * endDist),
-                        strokeWidth = 1f,
-                    )
-                }
-
-                // Draw Node Icons (Wi-Fi green circles & Bluetooth cyan hexagons)
-                displayDevices.forEach { device ->
-                    val position = atlasPoint(device, size, heading, displayZoom, mapOffset)
+                // Nodes
+                drawOrder.forEach { device ->
+                    val position = atlasPoint(device, size, heading, displayZoom, mapOffset, radialFractions[device.id] ?: 0.8f)
+                    val isSelected = selectedDevice?.id == device.id
                     val color = markerColor(device)
-                    val isSelected = selectedDevice?.id == device.id
-                    val markerRadius = if (isSelected) 10.dp.toPx() else 8.dp.toPx()
-
-                    // Glow halo
-                    drawCircle(color = color.copy(alpha = 0.22f), radius = markerRadius * 1.8f, center = position)
-
-                    if (isSelected) {
-                        drawCircle(
-                            color = RingGreen.copy(alpha = 0.30f),
-                            radius = markerRadius * 1.8f,
-                            center = position,
-                            style = Stroke(width = 4.dp.toPx()),
-                        )
-                        drawCircle(
-                            color = RingGreen,
-                            radius = markerRadius * 1.6f,
-                            center = position,
-                            style = Stroke(width = 1.5.dp.toPx()),
-                        )
-                    }
-
                     if (device.type == DeviceType.WIFI) {
-                        drawCircle(color = color, radius = markerRadius, center = position)
-                        drawWifiGlyph(position, markerRadius * 1.1f, Color.White)
-                        drawCircle(color = Color.Black.copy(alpha = 0.3f), radius = markerRadius, center = position, style = Stroke(width = 1f))
+                        val alpha = if (device.signal < -88) 0.7f else 1f
+                        val ringed = isSelected || device.id in ringedIds || device.signal >= -60
+                        drawWifiNode(position, nodeRadius * 0.96f, color, alpha, ringed, isSelected, u)
                     } else {
-                        drawPath(hexagonPath(position.x, position.y, markerRadius), color)
-                        drawBluetoothGlyph(position, markerRadius * 1.25f, Color.White, markerRadius * 0.18f)
-                        drawPath(
-                            hexagonPath(position.x, position.y, markerRadius),
-                            Color.Black.copy(alpha = 0.3f),
-                            style = Stroke(width = 1f, join = StrokeJoin.Round),
+                        drawBluetoothNode(position, nodeRadius, color, isSelected, u)
+                    }
+                }
+
+                // Callout pills (sit right next to their node, no leader line)
+                val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    color = android.graphics.Color.WHITE
+                }
+                val placed = mutableListOf<androidx.compose.ui.geometry.Rect>().apply {
+                    add(
+                        androidx.compose.ui.geometry.Rect(
+                            center.x - compassRadius * 1.15f, center.y - compassRadius * 1.15f,
+                            center.x + compassRadius * 1.15f, center.y + compassRadius * 1.15f,
+                        )
+                    )
+                }
+                labelDevices.forEach { device ->
+                    val position = atlasPoint(device, size, heading, displayZoom, mapOffset, radialFractions[device.id] ?: 0.8f)
+                    val isSelected = selectedDevice?.id == device.id
+                    textPaint.textSize = (if (isSelected) 33f else 31f) * u
+                    val textWidth = textPaint.measureText(device.name)
+                    val chipHeight = textPaint.textSize * 1.65f
+                    val chipWidth = textWidth + 38f * u
+                    val gap = nodeRadius * 1.42f + 10f * u
+
+                    var left = position.x + gap
+                    if (left + chipWidth > size.width - 6f * u) left = position.x - gap - chipWidth
+                    left = left.coerceAtLeast(6f * u)
+
+                    var top = (position.y - chipHeight / 2f).coerceIn(60f * u, size.height - chipHeight - 70f * u)
+                    fun rectAt(y: Float) = androidx.compose.ui.geometry.Rect(left, y, left + chipWidth, y + chipHeight)
+                    var tries = 0
+                    while (tries < 8 && placed.any { it.overlaps(rectAt(top)) }) {
+                        top += chipHeight + 6f * u
+                        tries++
+                    }
+                    top = top.coerceAtMost(size.height - chipHeight - 70f * u)
+                    placed.add(rectAt(top))
+
+                    if (abs(top + chipHeight / 2f - position.y) > chipHeight * 0.6f) {
+                        drawLine(
+                            color = LimeLine.copy(alpha = 0.6f),
+                            start = position,
+                            end = Offset(left.coerceAtLeast(position.x).coerceAtMost(left + chipWidth), top + chipHeight / 2f),
+                            strokeWidth = 1.6f * u,
                         )
                     }
-                }
 
-                // Callout Labels (Pills) with Leader Lines
-                // Select 3 distinct primary targets matching the reference mock
-                val labelDevices = mutableListOf<NetworkDevice>()
-                selectedDevice?.let { labelDevices.add(it) }
-
-                val targetNames = listOf("vodafone8E27A5", "VM7519251", "VM9668153")
-                targetNames.forEach { tName ->
-                    if (labelDevices.none { it.name == tName }) {
-                        displayDevices.firstOrNull { it.name == tName }?.let { labelDevices.add(it) }
-                    }
-                }
-
-                val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    textSize = 11.dp.toPx()
-                    typeface = android.graphics.Typeface.DEFAULT_BOLD
-                }
-                val chipFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-                val chipBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-
-                val labelPad = 6.dp.toPx()
-                val chipRadius = 8.dp.toPx()
-
-                labelDevices.forEach { device ->
-                    val position = atlasPoint(device, size, heading, displayZoom, mapOffset)
-                    val isSelected = selectedDevice?.id == device.id
-                    val name = device.name
-
-                    textPaint.textSize = if (isSelected) 12.dp.toPx() else 11.dp.toPx()
-                    val textWidth = textPaint.measureText(name)
-                    val chipHeight = textPaint.textSize * 1.75f
-                    val chipWidth = textWidth + labelPad * 2f
-
-                    // Position pill cleanly next to node in its sector
-                    var left = position.x + 14.dp.toPx()
-                    if (left + chipWidth > size.width - 6.dp.toPx()) {
-                        left = position.x - 14.dp.toPx() - chipWidth
-                    }
-                    if (left < 6.dp.toPx()) left = 6.dp.toPx()
-                    val top = (position.y - chipHeight / 2f).coerceIn(24.dp.toPx(), size.height - chipHeight - 32.dp.toPx())
-                    val rect = RectF(left, top, left + chipWidth, top + chipHeight)
-
-                    // Draw Leader Line connecting callout pill to target node
-                    val closestX = position.x.coerceIn(rect.left, rect.right)
-                    val closestY = position.y.coerceIn(rect.top, rect.bottom)
-                    drawLine(
-                        color = if (isSelected) RingGreen else WifiGreen.copy(alpha = 0.85f),
-                        start = position,
-                        end = Offset(closestX, closestY),
-                        strokeWidth = 1.5.dp.toPx(),
-                    )
+                    val corner = CornerRadius(chipHeight * 0.42f)
+                    val accent = if (isSelected) RingGreen else CyanMid
+                    // glow, fill, border
+                    drawRoundRect(accent.copy(alpha = 0.12f), Offset(left - 3f * u, top - 3f * u), Size(chipWidth + 6f * u, chipHeight + 6f * u), corner, style = Stroke(width = 6f * u))
+                    drawRoundRect(Color(0xEA0A1B26), Offset(left, top), Size(chipWidth, chipHeight), corner)
+                    drawRoundRect(accent.copy(alpha = 0.75f), Offset(left, top), Size(chipWidth, chipHeight), corner, style = Stroke(width = 1.8f * u))
 
                     drawIntoCanvas { canvas ->
-                        val native = canvas.nativeCanvas
-                        chipFill.color = android.graphics.Color.argb(238, 7, 16, 26)
-                        native.drawRoundRect(rect, chipRadius, chipRadius, chipFill)
-
-                        chipBorder.color = if (isSelected) RingGreen.toArgb() else CyanMid.copy(alpha = 0.75f).toArgb()
-                        chipBorder.strokeWidth = if (isSelected) 1.6.dp.toPx() else 1.2.dp.toPx()
-                        native.drawRoundRect(rect, chipRadius, chipRadius, chipBorder)
-
-                        textPaint.color = android.graphics.Color.WHITE
-                        val baseline = rect.top + chipHeight / 2f - (textPaint.ascent() + textPaint.descent()) / 2f
-                        native.drawText(name, rect.left + labelPad, baseline, textPaint)
+                        val baseline = top + chipHeight / 2f - (textPaint.ascent() + textPaint.descent()) / 2f
+                        canvas.nativeCanvas.drawText(device.name, left + 19f * u, baseline, textPaint)
                     }
                 }
             }
@@ -543,7 +378,7 @@ fun InteractiveRadarDisplay(
                 maxLines = 1,
             )
 
-            // Bottom status bar: UTC clock on left, hardware status icons on right
+            // Bottom status bar
             Text(
                 text = utcTime,
                 modifier = Modifier
@@ -560,27 +395,39 @@ fun InteractiveRadarDisplay(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    imageVector = Icons.Default.Wifi,
-                    contentDescription = "Wifi",
-                    tint = LegendText,
-                    modifier = Modifier.size(20.dp)
-                )
-                Icon(
-                    imageVector = Icons.Default.SignalCellularAlt,
-                    contentDescription = "Cellular",
-                    tint = LegendText,
-                    modifier = Modifier.size(20.dp)
-                )
-                Icon(
-                    imageVector = Icons.Default.BatteryFull,
-                    contentDescription = "Battery",
-                    tint = LegendText,
-                    modifier = Modifier.size(20.dp)
-                )
+                Icon(Icons.Default.Wifi, "Wifi", tint = LegendText, modifier = Modifier.size(20.dp))
+                Icon(Icons.Default.SignalCellularAlt, "Cellular", tint = LegendText, modifier = Modifier.size(20.dp))
+                Icon(Icons.Default.BatteryFull, "Battery", tint = LegendText, modifier = Modifier.size(20.dp))
             }
         }
     }
+}
+
+// ── Placement ────────────────────────────────────────────────────────────────
+
+/**
+ * Maps each device to a radial fraction (0..1 of the main ring) by signal RANK, not absolute dBm.
+ * Strongest devices land just inside the 5m ring, weakest at the rim, with a little hash jitter.
+ */
+private fun computeRadialFractions(devices: List<NetworkDevice>): Map<String, Float> {
+    if (devices.isEmpty()) return emptyMap()
+    val sorted = devices.sortedByDescending { it.signal }
+    val denominator = (sorted.size - 1).coerceAtLeast(1).toFloat()
+    val result = HashMap<String, Float>(sorted.size)
+    sorted.forEachIndexed { index, device ->
+        val rank = index / denominator
+        val hash = abs(device.address.hashCode())
+        val jitter = (((hash / 13) % 11) - 5) * 0.012f
+        result[device.id] = (0.52f + 0.52f * sqrt(rank) + jitter).coerceIn(0.50f, 1.06f)
+    }
+    return result
+}
+
+/** Real scan results don't set radarAngle (it defaults to 0), so derive a stable spread from the address. */
+private fun nodeAngle(device: NetworkDevice): Float {
+    if (device.radarAngle != 0f) return device.radarAngle
+    val hash = abs(device.address.hashCode()).toLong()
+    return ((hash * 2654435761L) % 360000L) / 1000f
 }
 
 private fun atlasPoint(
@@ -589,20 +436,17 @@ private fun atlasPoint(
     heading: Float,
     zoom: Float,
     mapOffset: Offset,
+    radialFraction: Float,
 ): Offset {
-    val center = Offset(viewport.width / 2f + mapOffset.x, viewport.height / 2f + mapOffset.y)
-    val radius = minOf(viewport.width, viewport.height) * 0.33f * zoom
-    val normalizedSignal = ((device.signal + 100).coerceIn(0, 100)) / 100f
-    val distance = (0.96f - normalizedSignal * 0.78f).coerceIn(0.12f, 0.96f)
-
+    val u = minOf(viewport.width, viewport.height) / 1000f
+    val center = Offset(viewport.width / 2f + mapOffset.x, viewport.height / 2f + 8f * u + mapOffset.y)
+    val radius = minOf(viewport.width, viewport.height) * RING_FRACTION * zoom
     val hash = abs(device.address.hashCode())
     val angleJitter = ((hash % 9) - 4) * 1.6f
-    val radiusJitter = (((hash / 9) % 7) - 3) * 0.015f
-    val radians = Math.toRadians((device.radarAngle + heading + angleJitter).toDouble())
-    val jitteredDistance = (distance + radiusJitter).coerceIn(0.10f, 0.97f)
+    val radians = Math.toRadians((nodeAngle(device) + heading + angleJitter).toDouble())
     return Offset(
-        x = center.x + sin(radians).toFloat() * radius * jitteredDistance,
-        y = center.y - cos(radians).toFloat() * radius * jitteredDistance,
+        x = center.x + sin(radians).toFloat() * radius * radialFraction,
+        y = center.y - cos(radians).toFloat() * radius * radialFraction,
     )
 }
 
@@ -612,6 +456,234 @@ private fun markerColor(device: NetworkDevice): Color = when {
     device.type == DeviceType.WIFI -> WifiGreen
     device.riskScore >= 60 -> RiskOrange
     else -> BluetoothBlue
+}
+
+// ── Drawing helpers ──────────────────────────────────────────────────────────
+
+/** Radar sweep: translucent wedge with angular fade + a bright leading edge that reaches the halo. */
+private fun DrawScope.drawSweep(center: Offset, radius: Float, beamAngle: Float, scanning: Boolean, u: Float) {
+    val trail = if (scanning) 60f else 30f
+    val alpha = if (scanning) 0.38f else 0.28f
+    val fraction = trail / 360f
+    rotate(degrees = beamAngle, pivot = center) {
+        val brush = if (scanning) {
+            // trailing behind the (clockwise-moving) beam
+            Brush.sweepGradient(
+                0f to Color.Transparent,
+                (1f - fraction) to Color.Transparent,
+                1f to CyanBright.copy(alpha = alpha),
+                center = center,
+            )
+        } else {
+            // idle pose: glow on the clockwise side of the line, as in the mock
+            Brush.sweepGradient(
+                0f to CyanBright.copy(alpha = alpha),
+                fraction to Color.Transparent,
+                1f to Color.Transparent,
+                center = center,
+            )
+        }
+        drawArc(
+            brush = brush,
+            startAngle = if (scanning) -trail else 0f,
+            sweepAngle = trail,
+            useCenter = true,
+            topLeft = Offset(center.x - radius, center.y - radius),
+            size = Size(radius * 2f, radius * 2f),
+        )
+        val tip = Offset(center.x + radius * HALO, center.y)
+        drawLine(
+            brush = Brush.linearGradient(
+                colors = listOf(CyanBright.copy(alpha = 0.10f), CyanBright.copy(alpha = 0.95f)),
+                start = center,
+                end = tip,
+            ),
+            start = center,
+            end = tip,
+            strokeWidth = 2.4f * u,
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+/** Curved link from the compass rim to a node. Wi-Fi = lime and brighter, Bluetooth = faint teal. */
+private fun DrawScope.drawLink(
+    center: Offset,
+    compassRadius: Float,
+    position: Offset,
+    nodeRadius: Float,
+    device: NetworkDevice,
+    u: Float,
+) {
+    val dx = position.x - center.x
+    val dy = position.y - center.y
+    val distance = hypot(dx.toDouble(), dy.toDouble()).toFloat()
+    if (distance <= compassRadius + nodeRadius) return
+
+    val dirX = dx / distance
+    val dirY = dy / distance
+    val start = Offset(center.x + dirX * compassRadius, center.y + dirY * compassRadius)
+    val end = Offset(position.x - dirX * nodeRadius * 0.9f, position.y - dirY * nodeRadius * 0.9f)
+
+    val hash = abs(device.address.hashCode())
+    val sign = if (hash % 2 == 0) 1f else -1f
+    val bend = sign * (0.08f + (hash % 5) * 0.018f) * distance
+    val control = Offset(
+        (start.x + end.x) / 2f - dirY * bend,
+        (start.y + end.y) / 2f + dirX * bend,
+    )
+    val path = Path().apply {
+        moveTo(start.x, start.y)
+        quadraticTo(control.x, control.y, end.x, end.y)
+    }
+
+    if (device.type == DeviceType.WIFI) {
+        drawPath(
+            path = path,
+            brush = Brush.linearGradient(
+                colors = listOf(LimeLine.copy(alpha = 0.12f), LimeLine.copy(alpha = 0.70f)),
+                start = start,
+                end = end,
+            ),
+            style = Stroke(width = 1.8f * u, cap = StrokeCap.Round),
+        )
+    } else {
+        drawPath(
+            path = path,
+            color = BluetoothBlue.copy(alpha = 0.26f),
+            style = Stroke(width = 1.1f * u, cap = StrokeCap.Round),
+        )
+    }
+}
+
+/** Compass disc, glowing rim, 4-point star, notched north arrow and N/E/S/W letters. */
+private fun DrawScope.drawCompass(center: Offset, r: Float, heading: Float, u: Float) {
+    drawCircle(Color(0xFF05111B).copy(alpha = 0.94f), r, center)
+    drawCircle(CyanMid.copy(alpha = 0.12f), r, center, style = Stroke(width = 12f * u))
+    drawCircle(CyanBright.copy(alpha = 0.90f), r, center, style = Stroke(width = 2.6f * u))
+
+    // Star glow
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(CyanBright.copy(alpha = 0.55f), Color.Transparent),
+            center = center,
+            radius = r * 0.35f,
+        ),
+        radius = r * 0.35f,
+        center = center,
+    )
+
+    // 4-point star
+    val arm = r * 0.41f
+    val thick = r * 0.045f
+    val horizontal = Path().apply {
+        moveTo(center.x - arm, center.y)
+        lineTo(center.x, center.y - thick)
+        lineTo(center.x + arm, center.y)
+        lineTo(center.x, center.y + thick)
+        close()
+    }
+    val vertical = Path().apply {
+        moveTo(center.x, center.y - arm)
+        lineTo(center.x + thick, center.y)
+        lineTo(center.x, center.y + arm)
+        lineTo(center.x - thick, center.y)
+        close()
+    }
+    drawPath(horizontal, CyanBright)
+    drawPath(vertical, CyanBright)
+
+    // North arrow: notched arrowhead straddling the rim, rotates with the map
+    rotate(degrees = heading, pivot = center) {
+        val arrow = Path().apply {
+            moveTo(center.x, center.y - r * 1.22f)
+            lineTo(center.x + r * 0.17f, center.y - r * 0.86f)
+            lineTo(center.x, center.y - r * 0.95f)
+            lineTo(center.x - r * 0.17f, center.y - r * 0.86f)
+            close()
+        }
+        drawPath(arrow, CyanBright.copy(alpha = 0.25f), style = Stroke(width = 8f * u, join = StrokeJoin.Round))
+        drawPath(arrow, CyanBright)
+    }
+
+    // Inner letters
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = r * 0.26f
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        color = CyanBright.toArgb()
+    }
+    drawIntoCanvas { canvas ->
+        val native = canvas.nativeCanvas
+        val letterRing = r * 0.60f
+        listOf(0f to "N", 90f to "E", 180f to "S", 270f to "W").forEach { (bearing, letter) ->
+            val radians = Math.toRadians((bearing + heading).toDouble())
+            val x = center.x + sin(radians).toFloat() * letterRing
+            val y = center.y - cos(radians).toFloat() * letterRing
+            native.drawText(letter, x - paint.measureText(letter) / 2f, y + paint.textSize / 3f, paint)
+        }
+    }
+}
+
+/** Glossy green circle with white Wi-Fi glyph; optional lime emphasis ring. */
+private fun DrawScope.drawWifiNode(
+    c: Offset,
+    r: Float,
+    base: Color,
+    alpha: Float,
+    ringed: Boolean,
+    selected: Boolean,
+    u: Float,
+) {
+    val light = lerp(base, Color.White, 0.30f).copy(alpha = alpha)
+    val dark = lerp(base, Color.Black, 0.30f).copy(alpha = alpha)
+    drawCircle(Color.Black.copy(alpha = 0.35f * alpha), r * 1.08f, c + Offset(0f, r * 0.12f))
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(light, dark),
+            center = c - Offset(0f, r * 0.30f),
+            radius = r * 1.3f,
+        ),
+        radius = r,
+        center = c,
+    )
+    drawCircle(NodeOutline.copy(alpha = 0.55f * alpha), r, c, style = Stroke(width = 1.5f * u))
+    drawWifiGlyph(c, r * 1.15f, Color.White.copy(alpha = alpha))
+    if (ringed) {
+        drawCircle(
+            color = LimeLine.copy(alpha = 0.80f),
+            radius = r * 1.45f,
+            center = c,
+            style = Stroke(width = if (selected) 2.8f * u else 1.8f * u),
+        )
+    }
+}
+
+/** Crisp gradient hexagon with bold white Bluetooth rune. */
+private fun DrawScope.drawBluetoothNode(c: Offset, r: Float, base: Color, selected: Boolean, u: Float) {
+    val light = lerp(base, Color.White, 0.28f)
+    val dark = lerp(base, Color.Black, 0.22f)
+    drawPath(hexagonPath(c.x, c.y + r * 0.10f, r * 1.04f), Color.Black.copy(alpha = 0.35f))
+    drawPath(
+        path = hexagonPath(c.x, c.y, r),
+        brush = Brush.linearGradient(
+            colors = listOf(light, dark),
+            start = Offset(c.x, c.y - r),
+            end = Offset(c.x, c.y + r),
+        ),
+    )
+    drawPath(
+        path = hexagonPath(c.x, c.y, r),
+        color = NodeOutline.copy(alpha = 0.60f),
+        style = Stroke(width = 1.6f * u, join = StrokeJoin.Round),
+    )
+    drawBluetoothGlyph(c, r * 1.35f, Color.White, r * 0.17f)
+    if (selected) {
+        drawPath(
+            path = hexagonPath(c.x, c.y, r * 1.45f),
+            color = RingGreen,
+            style = Stroke(width = 2.4f * u, join = StrokeJoin.Round),
+        )
+    }
 }
 
 /** Wi-Fi fan: three arcs opening upward above a dot. */
